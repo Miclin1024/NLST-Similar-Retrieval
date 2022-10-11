@@ -76,7 +76,7 @@ class NLSTDataReader:
             return self.transform(np.array([
                 pydicom.dcmread(file).pixel_array
                 for file in glob.glob(f"{series_folder}/*")
-            ]))
+            ])).astype("int32")
 
     @staticmethod
     def transform(series_array: np.ndarray) -> np.ndarray:
@@ -94,10 +94,15 @@ class NLSTDataReader:
             result = series_array
 
         size = (TRANSFORM_SHAPE[1], TRANSFORM_SHAPE[2])
-        return np.array([
-            cv2.resize(pixel_array, dsize=size, interpolation=cv2.INTER_CUBIC)
+        result = np.array([
+            cv2.resize(pixel_array, dsize=size,
+                       interpolation=cv2.INTER_LINEAR_EXACT)
             for pixel_array in result
         ])
+        # Transform from (128, 128, 128) to (1, 128, 128, 128) so that after
+        # apply batches our shape would be (B, C_in, D, H, W)
+        result = result.reshape((1, -1, *size))
+        return result
 
     def visualize(self, sid: int, window_width: int = 400, window_center: int = 40, date: str = None):
         patient_data = self.read_patient(sid, output="dcm")
@@ -121,5 +126,5 @@ class NLSTDataReader:
 if __name__ == '__main__':
     dataset = NLSTDataReader(manifest=1663396252954)
     uid = dataset.read_patient(100002, output="uid")["01-02-1999"]
-    print(dataset.read_uid(uid))
+    print(dataset.read_uid(uid).shape)
 

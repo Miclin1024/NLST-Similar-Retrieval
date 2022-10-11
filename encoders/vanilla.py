@@ -33,7 +33,7 @@ class VanillaVAE(BaseVAE):
         self.encoder = nn.Sequential(*modules)
         self.fc_mu = nn.Linear(
             hidden_dimensions[-1] * 64, latent_dimensions)
-        self.fc_sigma = nn.Linear(
+        self.fc_var = nn.Linear(
             hidden_dimensions[-1] * 64, latent_dimensions)
 
         # Decoder
