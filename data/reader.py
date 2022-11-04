@@ -5,9 +5,12 @@ import cv2
 import numpy as np
 import pandas as pd
 from utils import *
+from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 
-DATA_FOLDER = os.path.join(os.path.curdir, "data")
+
+load_dotenv()
+DATA_FOLDER = os.getenv("DATA_FOLDER") or "data/"
 TRANSFORM_SHAPE = (128, 128, 128)
 
 
