@@ -330,7 +330,7 @@ def train(train_loader, model, criterion, optimizer, epoch, args):
     model.eval()
 
     end = time.time()
-    for i, (images, target) in enumerate(train_loader):
+    for i, images in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
@@ -376,7 +376,7 @@ def validate(val_loader, model, criterion, args):
 
     with torch.no_grad():
         end = time.time()
-        for i, (images, target) in enumerate(val_loader):
+        for i, images in enumerate(val_loader):
             if args.gpu is not None:
                 images = images.cuda(args.gpu, non_blocking=True)
             target = target.cuda(args.gpu, non_blocking=True)
