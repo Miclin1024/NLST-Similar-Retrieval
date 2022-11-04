@@ -1,8 +1,6 @@
 import os
 
 import numpy as np
-import torch.backends.mps
-
 from encoders import *
 from dataset import NLSTDataset
 from torch.utils.data import Dataset
@@ -21,7 +19,7 @@ class Runner:
 
         # Note: MPS currently doesn't support Conv3D
         if torch.cuda.is_available():
-            self.device = torch.cuda.device
+            self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
 

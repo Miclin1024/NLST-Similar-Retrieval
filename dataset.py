@@ -4,7 +4,9 @@ from sklearn.model_selection import train_test_split
 
 
 class NLSTDataset(Dataset):
-    def __init__(self, manifest: int, train: bool, test_size=0.33):
+    def __init__(self, manifest: int, train: bool, test_size=0.33, *args, **kwargs):
+        super(NLSTDataset, self).__init__(*args, **kwargs)
+
         self.reader = NLSTDataReader(manifest)
         self.key_list: list[str] = []
         for _, v in self.reader.read_all_patients(output="uid").items():
