@@ -16,7 +16,14 @@ TRANSFORM_SHAPE = (128, 128, 128)
 
 class NLSTDataReader:
     def __init__(self, manifest: int):
-        self.manifest_folder = os.path.join(DATA_FOLDER, f"manifest-{manifest}")
+        # self.manifest_folder = os.path.join(DATA_FOLDER, f"manifest-{manifest}")
+        self.manifest_folder = glob.glob(f"{DATA_FOLDER}manifest*{manifest}", recursive=False)
+        if len(self.manifest_folder) > 0:
+            self.manifest_folder = self.manifest_folder[0]
+        else:
+            raise ValueError("Cannot locate the manifest. "
+                             "Have you configured your data folder and make "
+                             "sure that the manifest folder is in there?")
         self.metadata = pd.read_csv(
             os.path.join(self.manifest_folder, "metadata.csv")
         )
