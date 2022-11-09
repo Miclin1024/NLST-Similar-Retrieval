@@ -3,3 +3,5 @@ import torch
 
 
 Tensor = torch.Tensor
+PatientID = int
+SeriesID = str

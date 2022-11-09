@@ -1,25 +1,33 @@
 import os
-import glob
-import pydicom
 import cv2
-import numpy as np
+import glob
+import attrs
 import pandas as pd
 from utils import *
+from _types import *
+from pydicom import dcmread
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 
 
+# Use a .env file to indicate where the manifests are stored
 load_dotenv()
 DATA_FOLDER = os.getenv("DATA_FOLDER") or "data/"
 TRANSFORM_SHAPE = (128, 128, 128)
 
 
+@attrs.define(slots=True, auto_attribs=True, init=False)
 class NLSTDataReader:
+    manifest_folder: str
+    metadata: pd.DataFrame
+    patient_series_index: dict[PatientID, list[SeriesID]]
+    series_list: list[SeriesID]
+
     def __init__(self, manifest: int):
-        # self.manifest_folder = os.path.join(DATA_FOLDER, f"manifest-{manifest}")
-        self.manifest_folder = glob.glob(f"{DATA_FOLDER}manifest*{manifest}", recursive=False)
-        if len(self.manifest_folder) > 0:
-            self.manifest_folder = self.manifest_folder[0]
+        manifest_folder = glob.glob(f"{DATA_FOLDER}manifest*{manifest}", recursive=False)
+        if len(manifest_folder) > 0:
+            self.manifest_folder = manifest_folder[0]
+
         else:
             raise ValueError("Cannot locate the manifest. "
                              "Have you configured your data folder and make "
@@ -27,66 +35,50 @@ class NLSTDataReader:
         self.metadata = pd.read_csv(
             os.path.join(self.manifest_folder, "metadata.csv")
         )
+        # Remove localizer series. Remove duplicates done on the same
+        # patient on the same date (the scans use different post-processing kernels).
+        self.metadata = self.metadata[self.metadata["Number of Images"] > 3]\
+            .drop_duplicates(subset=["Subject ID", "Study Date"], keep="first")
 
-    def read_patient(self, sid: int, output="pixel") \
-            -> dict[str, np.ndarray | str | pydicom.FileDataset]:
-        metadata = self.metadata
-        patient_meta = metadata[
-            (metadata["Subject ID"] == sid) &
-            (metadata["Number of Images"] > 3)
-        ].drop_duplicates(subset=["Study Date"], keep="first")
+        index = {}
+        # Build an index with patient id, scans are ordered by their dates
+        # Using iterrows() over itertuple() due to space within column names
+        for _, row in self.metadata.iterrows():
+            patient_id = row["Subject ID"]
+            if patient_id not in index.keys():
+                index[patient_id] = []
+            year = int(row["Study Date"].split("-")[-1])
+            series_id = row["Series UID"]
+            insert_loc = 0
+            for _, current_year in index[patient_id]:
+                if current_year < year:
+                    insert_loc += 1
+                else:
+                    break
+            index[patient_id].insert(insert_loc, (series_id, year))
 
-        assert len(patient_meta.index) != 0, f"Patient {sid} not found"
+        self.series_list = []
+        self.patient_series_index = {}
+        for patient_id in index.keys():
+            patient_list = list(map(
+                lambda x: x[0], index[patient_id]
+            ))
+            self.patient_series_index[patient_id] = patient_list
+            self.series_list.extend(patient_list)
 
-        patient_meta = patient_meta.reset_index(drop=True)
-
-        if output == "uid":
-            return {row["Study Date"]: row["Series UID"]
-                    for _, row in patient_meta.iterrows()}
-        else:
-            return {row["Study Date"]: self.read_series(
-                        row["File Location"], use_full_dcm=(output == "dcm")
-                    ) for _, row in patient_meta.iterrows()}
-
-    def read_uid(self, uid: str, output="pixel") -> np.ndarray:
-        metadata = self.metadata
-        path = metadata[metadata["Series UID"] == uid]["File Location"].iloc[0]
-        return self.read_series(path, use_full_dcm=(output == "dcm"))
-
-    def read_all_patients(self, output="pixel") \
-            -> dict[str, dict[str, np.ndarray | str | pydicom.FileDataset]]:
-        metadata = self.metadata
-        patients_meta = metadata[
-            metadata["Number of Images"] > 3
-        ].drop_duplicates(subset=["Subject ID", "Study Date"], keep="first")
-        patients_meta = patients_meta.reset_index(drop=True)
-
-        patients_data = {}
-        for _, row in patients_meta.iterrows():
-            sid = row["Subject ID"]
-            study_date = row["Study Date"]
-            if sid not in patients_data:
-                patients_data[sid] = {}
-            if output == "uid":
-                patients_data[sid][study_date] = row["Series UID"]
-            else:
-                patients_data[sid][study_date] = self.read_series(
-                    row["File Location"], use_full_dcm=(output == "dcm"))
-
-        return patients_data
-
-    def read_series(self, path: str, use_full_dcm=False) -> np.ndarray:
+    def read_series(self, series_id: SeriesID) -> (np.ndarray, dict):
+        row = self.metadata[self.metadata["Series UID"] == series_id].iloc[0].to_dict()
+        path = row["File Location"]
         series_folder = os.path.join(self.manifest_folder, path)
-        if use_full_dcm:
-            return np.array([
-                pydicom.dcmread(file)
-                for file in glob.glob(f"{series_folder}/*")
-            ])
-        else:
-            return self.transform(np.array([
-                pydicom.dcmread(file).pixel_array
-                for file in glob.glob(f"{series_folder}/*")
-            ])).astype("int32")
+        pixel_data = self.transform(np.array([
+            dcmread(file).pixel_array
+            for file in glob.glob(f"{series_folder}/*")
+        ])).astype("int32")
+        return pixel_data, row
+
+    def read_patient(self, patient_id: PatientID) -> (np.ndarray, dict):
+        patient_series_list = self.patient_series_index[patient_id]
+        return self.read_series(patient_series_list[0])
 
     @staticmethod
     def transform(series_array: np.ndarray) -> np.ndarray:
@@ -114,16 +106,16 @@ class NLSTDataReader:
         result = result.reshape((1, -1, *size))
         return result
 
-    def visualize(self, sid: int, window_width: int = 400, window_center: int = 40, date: str = None):
-        patient_data = self.read_patient(sid, output="dcm")
-        for date in sorted(patient_data.keys()):
-            image_series = patient_data[date]
-            print(f"{date} (5/{len(image_series)} slices chosen uniformly within each scan):")
-            step_size = len(image_series) // 4
+    def visualize(self, patient_id: PatientID, window_width: int = 400, window_center: int = 40, date: str = None):
+        patient_series_id = self.patient_series_index[patient_id]
+        for series_id in patient_series_id:
+            pixel_data, _ = self.read_series(series_id)
+            print(f"{date} (5/{len(pixel_data)} slices chosen uniformly within each scan):")
+            step_size = len(pixel_data) // 4
 
             fig, axs = plt.subplots(1, 5)
             for index in range(5):
-                dicom_data = image_series[index * step_size]
+                dicom_data = pixel_data[index * step_size]
                 _, _, intercept, slope = get_windowing(dicom_data)
                 image = window_image(dicom_data.pixel_array,
                                      window_center, window_width, intercept, slope)
@@ -135,6 +127,5 @@ class NLSTDataReader:
 
 if __name__ == '__main__':
     dataset = NLSTDataReader(manifest=1663396252954)
-    uid = dataset.read_patient(100002, output="uid")["01-02-1999"]
-    print(dataset.read_uid(uid).shape)
+    print(dataset.read_patient(100002)[0].shape)
 
