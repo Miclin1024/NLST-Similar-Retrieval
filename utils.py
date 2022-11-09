@@ -1,3 +1,4 @@
+import torch
 import random
 import pydicom
 import numpy as np
@@ -45,3 +46,9 @@ def get_windowing(data: pydicom.FileDataset) -> (int, int, int, int):
                     data[('0028', '1052')].value,  # Intercept
                     data[('0028', '1053')].value]  # Slope
     return [get_first_of_dicom_field_as_int(x) for x in dicom_fields]
+
+
+def log_softmax_with_factors(logits: torch.Tensor, log_factor: float = 1, neg_factor: float = 1) -> torch.Tensor:
+    exp_sum_neg_logits = torch.exp(logits).sum(dim=-1, keepdim=True) - torch.exp(logits)
+    softmax_result = logits - log_factor * torch.log(torch.exp(logits) + neg_factor * exp_sum_neg_logits)
+    return softmax_result

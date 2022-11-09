@@ -29,7 +29,7 @@ class NLSTDataReader:
             self.manifest_folder = manifest_folder[0]
 
         else:
-            raise ValueError("Cannot locate the manifest. "
+            raise ValueError(f"Cannot locate the manifest {manifest}. "
                              "Have you configured your data folder and make "
                              "sure that the manifest folder is in there?")
         self.metadata = pd.read_csv(

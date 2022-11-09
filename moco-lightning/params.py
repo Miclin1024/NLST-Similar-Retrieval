@@ -1,11 +1,13 @@
 from typing import Optional, Callable
 import attrs
+import torch.nn as nn
 
 
 @attrs.define(auto_attribs=True, slots=True)
 class ModelParams:
     # encoder model selection
-    encoder_arch: str = "resnet18"
+    encoder: nn.Module
+    # TODO: Implement shuffle batch in the future
     shuffle_batch_norm: bool = False
     embedding_dim: int = 512  # must match embedding dim of encoder
 
@@ -48,7 +50,8 @@ class ModelParams:
 
     # Change these to make more like VICReg
     use_vicreg_loss: bool = False
-    use_lagging_model: bool = True
+    # TODO: Maybe turn it back on in the future
+    use_lagging_model: bool = False
     use_unit_sphere_projection: bool = True
     invariance_loss_weight: float = 25.0
     variance_loss_weight: float = 25.0
@@ -62,7 +65,6 @@ class ModelParams:
 
     mlp_normalization: Optional[str] = None
     prediction_mlp_normalization: Optional[str] = "same"  # if same will use mlp_normalization
-    use_mlp_weight_standardization: bool = False
 
     # data loader parameters
     num_data_workers: int = 4
