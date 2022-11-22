@@ -51,7 +51,7 @@ class DatasetManager:
         )
         self.validation_ds = NLSTDataset(
             self._reader, effective_series_list=series[1], train=False,
-            transform=transform_validation
+            transform=transform_validation,
         )
         if test_length != 0:
             self.test_ds = NLSTDataset(

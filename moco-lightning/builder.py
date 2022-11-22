@@ -4,11 +4,11 @@ import attrs
 import torch
 import warnings
 from data import *
-from . import utils
+from .utils import *
 from attr import evolve
 from functools import partial
 from encoders.resnet import *
-from params import ModelParams
+from .params import ModelParams
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from typing import Optional, Callable
@@ -42,7 +42,6 @@ class LitMoCo(pl.LightningModule):
         if (
             hparams.gather_keys_for_queue
             and not hparams.shuffle_batch_norm
-            and not hparams.encoder_arch.startswith("ws_")
         ):
             warnings.warn(
                 "Configuration suspicious: gather_keys_for_queue without shuffle_batch_norm or weight standardization"
@@ -56,7 +55,7 @@ class LitMoCo(pl.LightningModule):
 
         self.manager = DatasetManager(
             int(os.environ.get("MANIFEST_ID")),
-            ds_split=[.8, .2, .0]
+            ds_split=[.7, .2, .1]
         )
 
         # if hparams.use_lagging_model:
@@ -124,8 +123,8 @@ class LitMoCo(pl.LightningModule):
         # bsz = batch size, n_split = , nc = number of channels, nh = number of height, nw = number of weight
         bsz, n_split, nc, nd, nh, nw = x.shape
         assert n_split == 2, "second dimension should be the split image -- dims should be N2CHW"
-        im_q = x[:, 0].contiguous().type(torch.FloatTensor)
-        im_k = x[:, 1].contiguous().type(torch.FloatTensor)
+        im_q = x[:, 0].contiguous()
+        im_k = x[:, 1].contiguous()
 
         # compute query features
 
@@ -198,7 +197,7 @@ class LitMoCo(pl.LightningModule):
                 else:
                     raise Exception("Must have negative examples for ce loss")
 
-                predictions = utils.log_softmax_with_factors(logits / self.hparams.T, neg_factor=neg_factor)
+                predictions = log_softmax_with_factors(logits / self.hparams.T, neg_factor=neg_factor)
                 return F.nll_loss(predictions, labels)
 
             return F.cross_entropy(logits / self.hparams.T, labels)
@@ -253,7 +252,7 @@ class LitMoCo(pl.LightningModule):
         }
 
     def forward(self, x) -> Any:
-        return self.model(x.type(torch.FloatTensor))
+        return self.model(x)
 
     def training_step(self, batch, batch_idx, optimizer_idx=None):
         all_params = list(self.model.parameters())
@@ -296,7 +295,7 @@ class LitMoCo(pl.LightningModule):
                 self.hparams.use_negative_examples_from_batch or self.hparams.use_negative_examples_from_queue
         )
         if some_negative_examples:
-            acc1, acc5 = utils.calculate_accuracy(logits, labels, topk=(1, 5))
+            acc1, acc5 = calculate_accuracy(logits, labels, topk=(1, 5))
             log_data.update({"step_train_acc1": acc1, "step_train_acc5": acc5})
 
         # dequeue and enqueue
@@ -309,7 +308,7 @@ class LitMoCo(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, class_labels = batch
         with torch.no_grad():
-            emb = self.model(x.type(torch.FloatTensor))
+            emb = self.model(x)
             emb = emb.view(self.hparams.batch_size, self.hparams.embedding_dim)
 
         return {"emb": emb, "labels": class_labels}
@@ -401,7 +400,7 @@ class LitMoCo(pl.LightningModule):
     def _dequeue_and_enqueue(self, keys):
         # gather keys before updating queue
         if self.hparams.gather_keys_for_queue:
-            keys = utils.concat_all_gather(keys)
+            keys = concat_all_gather(keys)
 
         batch_size = keys.shape[0]
 
@@ -422,6 +421,7 @@ class LitMoCo(pl.LightningModule):
             pin_memory=self.hparams.pin_data_memory,
             drop_last=self.hparams.drop_last_batch,
             shuffle=True,
+            persistent_workers=True,
         )
 
     def val_dataloader(self):
@@ -431,6 +431,7 @@ class LitMoCo(pl.LightningModule):
             num_workers=self.hparams.num_data_workers,
             pin_memory=self.hparams.pin_data_memory,
             drop_last=self.hparams.drop_last_batch,
+            persistent_workers=True,
         )
 
 
@@ -491,7 +492,7 @@ if __name__ == '__main__':
         encoder=encoder,
         embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 512,
         lr=0.08,
-        batch_size=16,
+        batch_size=8,
         gather_keys_for_queue=False,
         loss_type="ip",
         use_negative_examples_from_queue=False,
@@ -515,5 +516,16 @@ if __name__ == '__main__':
         for name, config in configs.items():
             method = LitMoCo(config)
             logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
-            trainer = pl.Trainer(logger=logger)
+            if torch.has_mps:
+                trainer = pl.Trainer(logger=logger,
+                                     accelerator="cpu",
+                                     log_every_n_steps=1,
+                                     max_epochs=100,
+                )
+            else:
+                trainer = pl.Trainer(logger=logger,
+                                     accelerator="gpu",
+                                     log_every_n_steps=1,
+                                     max_epochs=100,
+                )
             trainer.fit(method)
