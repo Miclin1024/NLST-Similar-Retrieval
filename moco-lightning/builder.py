@@ -322,7 +322,7 @@ class LitMoCo(pl.LightningModule):
         valid_accuracy = self.sklearn_classifier.score(embeddings[num_split_linear:], labels[num_split_linear:]) * 100
 
         log_data = {
-            "epoch": self.current_epoch,
+            "epoch": float(self.current_epoch),
             "train_class_acc": train_accuracy,
             "valid_class_acc": valid_accuracy,
             "T": self._get_temp(),

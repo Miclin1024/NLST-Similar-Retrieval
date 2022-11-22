@@ -88,7 +88,11 @@ class NLSTDataReader:
         pid: PatientID = manifest_row["Subject ID"]
         metadata_row = self.metadata[self.metadata["pid"] == pid].iloc[0].to_dict()
 
-        return image, metadata_row[self.target_meta_key]
+        target = metadata_row[self.target_meta_key]
+        if target is pd.NA and self.target_meta_key == "weight":
+            target = 183
+
+        return image, target
 
     def read_patient(self, patient_id: PatientID) -> (tio.Image, dict):
         patient_series_list = self.patient_series_index[patient_id]
