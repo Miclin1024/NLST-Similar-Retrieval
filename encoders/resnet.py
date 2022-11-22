@@ -156,3 +156,7 @@ def resnet18(in_channels, block=ResNetBasicBlock, *args, **kwargs):
 
 def resnet34(in_channels, block=ResNetBasicBlock, *args, **kwargs):
     return ResNetEncoder(in_channels, block=block, depths=[3, 4, 6, 3], *args, **kwargs)
+
+
+if __name__ == '__main__':
+    print(resnet34(in_channels=1))

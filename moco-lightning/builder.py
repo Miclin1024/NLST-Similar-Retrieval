@@ -11,7 +11,6 @@ from encoders.resnet import *
 from params import ModelParams
 import pytorch_lightning as pl
 import torch.nn.functional as F
-import torchvision.models.video
 from typing import Optional, Callable
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
@@ -22,7 +21,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 
 class LitMoCo(pl.LightningModule):
     model: torch.nn.Module
-    database: DatasetBase
+    manager: DatasetManager
     hparams: AttributeDict
     embedding_dim: Optional[int]
     lr_scheduler: Any
@@ -54,20 +53,11 @@ class LitMoCo(pl.LightningModule):
         if hparams.loss_type == "ce" and not some_negative_examples:
             warnings.warn("Configuration suspicious: cross entropy loss without negative examples")
 
-        # (B, 1, 128, 128, 128) -> (B, 512, 1, 1, 1) -> (B, 512)
-        # (128 - 5 + 2P) / S + 1 = 1
-        # torch.nn.Conv3d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros', device=None, dtype=None)
-        # Conv3D stride, kernel, in_channel=1
-        # Output height = (Input height + padding height top + padding height bottom - kernel height) / (stride height) + 1
-        # Output width = (Output width + padding width right + padding width left - kernel width) / (stride width) + 1
-        # BatchNorm
-        # RELU
-        # MLP
         self.model = hparams.encoder
 
-        self.database = DatasetBase(
+        self.manager = DatasetManager(
             int(os.environ.get("MANIFEST_ID")),
-            ds_split=[.7, .15, .15]
+            ds_split=[.8, .2, .0]
         )
 
         # if hparams.use_lagging_model:
@@ -141,6 +131,7 @@ class LitMoCo(pl.LightningModule):
         # compute query features
 
         emb_q = self.model(im_q)
+        emb_q = emb_q.view(self.hparams.batch_size, self.hparams.embedding_dim)
         q_projection = self.projection_model(emb_q)
         q = self.prediction_model(q_projection)  # queries: NxC
 
@@ -154,6 +145,7 @@ class LitMoCo(pl.LightningModule):
                 #     k = utils.BatchShuffleDDP.unshuffle(k, idx_unshuffle)
         else:
             emb_k = self.model(im_k)
+            emb_k = emb_k.view(self.hparams.batch_size, self.hparams.embedding_dim)
             k_projection = self.projection_model(emb_k)
             k = self.prediction_model(k_projection)  # queries: NxC
 
@@ -318,7 +310,8 @@ class LitMoCo(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, class_labels = batch
         with torch.no_grad():
-            emb = self.model(x)
+            emb = self.model(x.type(torch.FloatTensor))
+            emb = emb.view(self.hparams.batch_size, self.hparams.embedding_dim)
 
         return {"emb": emb, "labels": class_labels}
 
@@ -424,7 +417,7 @@ class LitMoCo(pl.LightningModule):
 
     def train_dataloader(self):
         return DataLoader(
-            self.database.train_ds,
+            self.manager.train_ds,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_data_workers,
             pin_memory=self.hparams.pin_data_memory,
@@ -434,7 +427,7 @@ class LitMoCo(pl.LightningModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.database.validation_ds,
+            self.manager.validation_ds,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_data_workers,
             pin_memory=self.hparams.pin_data_memory,
@@ -459,12 +452,10 @@ class MLP(torch.nn.Module):
             self.net = torch.nn.Linear(input_dim, output_dim)
             return
 
-        linear_net = torch.nn.Linear
-
         layers = []
         prev_dim = input_dim
         for _ in range(num_layers - 1):
-            layers.append(linear_net(prev_dim, hidden_dim))
+            layers.append(torch.nn.Linear(prev_dim, hidden_dim))
             if normalization is not None:
                 layers.append(normalization())
             layers.append(torch.nn.ReLU())
@@ -499,9 +490,9 @@ if __name__ == '__main__':
     encoder = resnet34(in_channels=1)
     base_config = ModelParams(
         encoder=encoder,
-        embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels,
-        lr=0.8,
-        batch_size=4,
+        embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 512,
+        lr=0.08,
+        batch_size=16,
         gather_keys_for_queue=False,
         loss_type="ip",
         use_negative_examples_from_queue=False,
@@ -525,5 +516,5 @@ if __name__ == '__main__':
         for name, config in configs.items():
             method = LitMoCo(config)
             logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
-            trainer = pl.Trainer(logger=logger, fast_dev_run=True)
+            trainer = pl.Trainer(logger=logger)
             trainer.fit(method)

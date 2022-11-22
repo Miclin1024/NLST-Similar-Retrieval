@@ -1,5 +1,5 @@
 import torch
-from _types import *
+from definitions import *
 from torch import nn
 from encoders import BaseVAE
 from torch.nn import functional
