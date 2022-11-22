@@ -329,7 +329,7 @@ class LitMoCo(pl.LightningModule):
             "m": self._get_m(),
         }
         print(f"Epoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
-        self.log_dict(log_data)
+        self.log_dict(log_data, sync_dist=True)
 
     def configure_optimizers(self):
         # exclude bias and batch norm from LARS and weight decay
@@ -504,12 +504,11 @@ if __name__ == '__main__':
             m=0.996,
         )
     else:
-        warnings.filterwarnings("ignore")
         base_config = ModelParams(
             encoder=encoder,
             embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
             lr=0.08,
-            batch_size=32,
+            batch_size=64,
             gather_keys_for_queue=False,
             loss_type="ip",
             use_negative_examples_from_queue=False,
@@ -542,7 +541,7 @@ if __name__ == '__main__':
             else:
                 trainer = pl.Trainer(logger=logger,
                                      accelerator="gpu",
-                                     log_every_n_steps=1,
+                                     log_every_n_steps=5,
                                      max_epochs=100,
                 )
             trainer.fit(method)
