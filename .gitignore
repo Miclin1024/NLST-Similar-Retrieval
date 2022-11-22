@@ -185,4 +185,4 @@ cython_debug/
 
 data/*/*
 .DS_Store
-metadata/
+tb_logs/
