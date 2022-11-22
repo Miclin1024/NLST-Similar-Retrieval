@@ -89,7 +89,7 @@ class NLSTDataReader:
         metadata_row = self.metadata[self.metadata["pid"] == pid].iloc[0].to_dict()
 
         target = metadata_row[self.target_meta_key]
-        if target is pd.NA and self.target_meta_key == "weight":
+        if np.isnan(target) and self.target_meta_key == "weight":
             target = 183
 
         return image, target
