@@ -488,20 +488,36 @@ class MLP(torch.nn.Module):
 
 if __name__ == '__main__':
     encoder = resnet34(in_channels=1)
-    base_config = ModelParams(
-        encoder=encoder,
-        embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 512,
-        lr=0.08,
-        batch_size=8,
-        gather_keys_for_queue=False,
-        loss_type="ip",
-        use_negative_examples_from_queue=False,
-        use_both_augmentations_as_queries=True,
-        mlp_normalization="bn",
-        prediction_mlp_layers=2,
-        projection_mlp_layers=2,
-        m=0.996,
-    )
+    if torch.has_mps:
+        base_config = ModelParams(
+            encoder=encoder,
+            embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
+            lr=0.08,
+            batch_size=8,
+            gather_keys_for_queue=False,
+            loss_type="ip",
+            use_negative_examples_from_queue=False,
+            use_both_augmentations_as_queries=True,
+            mlp_normalization="bn",
+            prediction_mlp_layers=2,
+            projection_mlp_layers=2,
+            m=0.996,
+        )
+    else:
+        base_config = ModelParams(
+            encoder=encoder,
+            embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
+            lr=0.08,
+            batch_size=32,
+            gather_keys_for_queue=False,
+            loss_type="ip",
+            use_negative_examples_from_queue=False,
+            use_both_augmentations_as_queries=True,
+            mlp_normalization="bn",
+            prediction_mlp_layers=2,
+            projection_mlp_layers=2,
+            m=0.996,
+        )
     configs = {
         "base": base_config,
         "pred_only": evolve(base_config, mlp_normalization=None, prediction_mlp_normalization="bn"),

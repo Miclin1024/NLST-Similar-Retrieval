@@ -97,8 +97,8 @@ class NLSTDataReader:
     @staticmethod
     def preprocess(image: tio.Image) -> tio.Image:
         transforms = [
-            tio.Resample((1.45, 1.45, 1.25)),
-            tio.CropOrPad((256, 256, 256)),
+            tio.Resample((2.8, 2.8, 2.5)),
+            tio.CropOrPad((128, 128, 128)),
             tio.ZNormalization(),
         ]
         return tio.Compose(transforms)(image)

@@ -21,9 +21,18 @@ class DatasetManager:
     @staticmethod
     def default_moco_transform() -> Callable:
         transforms = [
-            # tio.RandomElasticDeformation(
-            #     num_control_points=8, locked_borders=2),
-            # tio.RandomNoise(),
+            tio.RandomElasticDeformation(
+                num_control_points=8, locked_borders=2),
+            tio.RandomAffine(
+                scales=(0.9, 1.1),
+                degrees=15,
+                translation=20,
+                isotropic=True,
+                center="image",
+            ),
+            tio.RandomNoise(),
+            tio.RandomBlur(),
+            tio.ZNormalization(),
         ]
         return tio.Compose(transforms)
 
