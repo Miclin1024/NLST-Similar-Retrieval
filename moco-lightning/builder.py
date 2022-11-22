@@ -256,7 +256,7 @@ class LitMoCo(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, optimizer_idx=None):
         all_params = list(self.model.parameters())
-        x, class_labels = batch  # batch is a tuple, we just want the image
+        x, _ = batch  # batch is a tuple, we just want the image
 
         emb_q, q, k = self._get_embeddings(x)
         pos_ip, neg_ip = self._get_pos_neg_ip(emb_q, k)
@@ -282,9 +282,9 @@ class LitMoCo(pl.LightningModule):
         contrastive_loss = contrastive_loss.mean() * self.hparams.loss_constant_factor
 
         log_data = {
-            "step_train_loss": contrastive_loss,
-            "step_pos_cos": pos_ip,
-            "step_neg_cos": neg_ip,
+            "step_train_loss": contrastive_loss.item(),
+            "step_pos_cos": pos_ip.item(),
+            "step_neg_cos": neg_ip.item(),
             **losses,
         }
 
@@ -292,7 +292,7 @@ class LitMoCo(pl.LightningModule):
             self._momentum_update_key_encoder()
 
         some_negative_examples = (
-                self.hparams.use_negative_examples_from_batch or self.hparams.use_negative_examples_from_queue
+            self.hparams.use_negative_examples_from_batch or self.hparams.use_negative_examples_from_queue
         )
         if some_negative_examples:
             acc1, acc5 = calculate_accuracy(logits, labels, topk=(1, 5))
@@ -496,7 +496,6 @@ if __name__ == '__main__':
             batch_size=8,
             gather_keys_for_queue=False,
             loss_type="ip",
-            use_negative_examples_from_queue=False,
             use_both_augmentations_as_queries=True,
             mlp_normalization="bn",
             prediction_mlp_layers=2,
@@ -511,7 +510,6 @@ if __name__ == '__main__':
             batch_size=64,
             gather_keys_for_queue=False,
             loss_type="ip",
-            use_negative_examples_from_queue=False,
             use_both_augmentations_as_queries=True,
             mlp_normalization="bn",
             prediction_mlp_layers=2,
