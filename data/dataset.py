@@ -42,29 +42,26 @@ class DatasetManager:
                  transform_test: Callable = default_moco_transform()):
         self._reader = NLSTDataReader(manifest)
         total_length = len(self._reader.series_list)
-        train_length = math.floor(total_length * ds_split[0])
-        validation_length = math.floor(total_length * ds_split[1])
-        test_length = total_length - train_length - validation_length
-        series = np.split(
-            np.array(self._reader.series_list),
-            [train_length, validation_length, test_length]
-        )
+        train_idx = math.floor(total_length * ds_split[0])
+        validation_idx = math.floor(total_length * ds_split[1]) + train_idx
+        series_list = np.random.permutation(self._reader.series_list)
+        split_series = np.split(series_list, [train_idx, validation_idx])
 
         self.transform_train = transform_train
         self.transform_validation = transform_validation
         self.transform_test = transform_test
 
         self.train_ds = NLSTDataset(
-            self._reader, effective_series_list=series[0], train=True,
+            self._reader, effective_series_list=split_series[0], train=True,
             transform=transform_train
         )
         self.validation_ds = NLSTDataset(
-            self._reader, effective_series_list=series[1], train=False,
+            self._reader, effective_series_list=split_series[1], train=False,
             transform=transform_validation,
         )
-        if test_length != 0:
+        if len(split_series[2]) != 0:
             self.test_ds = NLSTDataset(
-                self._reader, effective_series_list=series[2], train=False,
+                self._reader, effective_series_list=split_series[2], train=False,
                 transform=transform_test
             )
         else:
