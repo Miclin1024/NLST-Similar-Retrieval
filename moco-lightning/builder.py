@@ -487,7 +487,6 @@ class MLP(torch.nn.Module):
 
 
 if __name__ == '__main__':
-    warnings.filterwarnings("ignore", module="itk")
     encoder = resnet34(in_channels=1)
     if torch.has_mps:
         base_config = ModelParams(
@@ -505,6 +504,7 @@ if __name__ == '__main__':
             m=0.996,
         )
     else:
+        warnings.filterwarnings("ignore")
         base_config = ModelParams(
             encoder=encoder,
             embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
