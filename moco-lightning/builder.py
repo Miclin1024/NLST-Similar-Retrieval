@@ -2,9 +2,9 @@ import os
 import copy
 import attrs
 import torch
-import utils
 import warnings
 from data import *
+from . import utils
 from attr import evolve
 from functools import partial
 from encoders.resnet import *
@@ -16,7 +16,6 @@ from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
 from pytorch_lightning.loggers import TensorBoardLogger
-
 
 
 class LitMoCo(pl.LightningModule):
