@@ -21,12 +21,12 @@ class DatasetManager:
     @staticmethod
     def default_moco_transform() -> Callable:
         transforms = [
-            tio.RandomElasticDeformation(
-                num_control_points=8, locked_borders=2),
+            # tio.RandomElasticDeformation(
+            #     num_control_points=8, locked_borders=2),
             tio.RandomAffine(
                 scales=(0.9, 1.1),
                 degrees=15,
-                translation=20,
+                translation=0,
                 isotropic=True,
                 center="image",
             ),
@@ -36,10 +36,14 @@ class DatasetManager:
         ]
         return tio.Compose(transforms)
 
-    def __init__(self, manifest: int, ds_split: list[float],
+    def __init__(self, manifest: int, ds_split=None,
                  transform_train: Callable = default_moco_transform(),
                  transform_validation: Callable = default_moco_transform(),
                  transform_test: Callable = default_moco_transform()):
+
+        if ds_split is None:
+            ds_split = [.8, .2, .0]
+
         self._reader = NLSTDataReader(manifest)
         total_length = len(self._reader.series_list)
         train_idx = math.floor(total_length * ds_split[0])
@@ -92,13 +96,13 @@ class NLSTDataset(torch.utils.data.Dataset):
         slice_image, target = self.reader.read_series(q_series_id)
         slice_tensor = slice_image.tensor
         if self.train:
-            slice_tensor = torch.stack(
-                (self.transform(slice_tensor), self.transform(slice_tensor))
+            stacked_tensor = torch.stack(
+                (slice_tensor, self.transform(slice_tensor))
             )
-
-        return slice_tensor, target
+            return stacked_tensor, target
+        else:
+            return slice_tensor, target
 
 
 if __name__ == '__main__':
-    database = DatasetManager(manifest=1663396252954, ds_split=[.8, .2, .0])
-    print(len(database.train_ds))
+    manager = DatasetManager(manifest=1663396252954)

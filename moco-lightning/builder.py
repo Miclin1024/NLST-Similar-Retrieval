@@ -1,17 +1,14 @@
-import os
 import copy
-import attrs
 import torch
 import warnings
 from data import *
 from .utils import *
 from attr import evolve
-from functools import partial
+from typing import Optional
 from encoders.resnet import *
 from .params import ModelParams
 import pytorch_lightning as pl
 import torch.nn.functional as F
-from typing import Optional, Callable
 from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
@@ -40,8 +37,8 @@ class LitMoCo(pl.LightningModule):
 
         # Check for configuration issues
         if (
-            hparams.gather_keys_for_queue
-            and not hparams.shuffle_batch_norm
+                hparams.gather_keys_for_queue
+                and not hparams.shuffle_batch_norm
         ):
             warnings.warn(
                 "Configuration suspicious: gather_keys_for_queue without shuffle_batch_norm or weight standardization"
@@ -292,7 +289,7 @@ class LitMoCo(pl.LightningModule):
             self._momentum_update_key_encoder()
 
         some_negative_examples = (
-            self.hparams.use_negative_examples_from_batch or self.hparams.use_negative_examples_from_queue
+                self.hparams.use_negative_examples_from_batch or self.hparams.use_negative_examples_from_queue
         )
         if some_negative_examples:
             acc1, acc5 = calculate_accuracy(logits, labels, topk=(1, 5))
@@ -311,15 +308,21 @@ class LitMoCo(pl.LightningModule):
             emb = self.model(x)
             emb = emb.view(self.hparams.batch_size, self.hparams.embedding_dim)
 
-        return {"emb": emb, "labels": class_labels}
+        return {"emb": emb, "labels": class_labels["bmi_category"]}
 
     def validation_epoch_end(self, outputs):
         embeddings = torch.cat([x["emb"] for x in outputs]).cpu().detach().numpy()
         labels = torch.cat([x["labels"] for x in outputs]).cpu().detach().numpy()
         num_split_linear = embeddings.shape[0] // 2
         self.sklearn_classifier.fit(embeddings[:num_split_linear], labels[:num_split_linear])
-        train_accuracy = self.sklearn_classifier.score(embeddings[:num_split_linear], labels[:num_split_linear]) * 100
-        valid_accuracy = self.sklearn_classifier.score(embeddings[num_split_linear:], labels[num_split_linear:]) * 100
+        train_accuracy = self.sklearn_classifier.score(
+            embeddings[:num_split_linear],
+            labels[:num_split_linear]
+        ) * 100
+        valid_accuracy = self.sklearn_classifier.score(
+            embeddings[num_split_linear:],
+            labels[num_split_linear:]
+        ) * 100
 
         log_data = {
             "epoch": float(self.current_epoch),
@@ -328,7 +331,7 @@ class LitMoCo(pl.LightningModule):
             "T": self._get_temp(),
             "m": self._get_m(),
         }
-        print(f"Epoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
+        print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
         self.log_dict(log_data, sync_dist=True)
 
     def configure_optimizers(self):
@@ -437,7 +440,7 @@ class LitMoCo(pl.LightningModule):
 
 class MLP(torch.nn.Module):
     def __init__(
-        self, input_dim, output_dim, hidden_dim, num_layers, normalization=None
+            self, input_dim, output_dim, hidden_dim, num_layers, normalization=None
     ):
         super().__init__()
         assert num_layers >= 0, "negative layers?!?"
@@ -493,7 +496,7 @@ if __name__ == '__main__':
             encoder=encoder,
             embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
             lr=0.08,
-            batch_size=8,
+            batch_size=16,
             gather_keys_for_queue=False,
             loss_type="ip",
             use_both_augmentations_as_queries=True,
@@ -535,11 +538,11 @@ if __name__ == '__main__':
                                      accelerator="cpu",
                                      log_every_n_steps=1,
                                      max_epochs=100,
-                )
+                                     )
             else:
                 trainer = pl.Trainer(logger=logger,
                                      accelerator="gpu",
                                      log_every_n_steps=5,
                                      max_epochs=100,
-                )
+                                     )
             trainer.fit(method)

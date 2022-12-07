@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 # Use a .env file to indicate where the manifests are stored
 load_dotenv()
 DATA_FOLDER = os.getenv("DATA_FOLDER") or "data/"
-TRANSFORM_SHAPE = (128, 128, 128)
 
 
 @attrs.define(slots=True, auto_attribs=True, init=False)
@@ -88,11 +87,21 @@ class NLSTDataReader:
         pid: PatientID = manifest_row["Subject ID"]
         metadata_row = self.metadata[self.metadata["pid"] == pid].iloc[0].to_dict()
 
-        target = metadata_row[self.target_meta_key]
-        if np.isnan(target) and self.target_meta_key == "weight":
-            target = 183
+        weight = metadata_row["weight"]
+        if np.isnan(weight):
+            weight = 183
 
-        return image, target
+        height = metadata_row["height"]
+        if np.isnan(height):
+            height = 68
+
+        bmi = weight / (height ** 2) * 703
+        bmi_range = np.array([18.5, 25, 30, 35, 40])
+
+        return image, {
+            "pid": pid,
+            "bmi_category": np.count_nonzero(bmi > bmi_range),
+        }
 
     def read_patient(self, patient_id: PatientID) -> (tio.Image, dict):
         patient_series_list = self.patient_series_index[patient_id]
@@ -101,29 +110,11 @@ class NLSTDataReader:
     @staticmethod
     def preprocess(image: tio.Image) -> tio.Image:
         transforms = [
+            tio.ZNormalization(),
             tio.Resample((2.8, 2.8, 2.5)),
             tio.CropOrPad((128, 128, 128)),
-            tio.ZNormalization(),
         ]
         return tio.Compose(transforms)(image)
-
-    def visualize(self, patient_id: PatientID, window_width: int = 400, window_center: int = 40, date: str = None):
-        patient_series_id = self.patient_series_index[patient_id]
-        for series_id in patient_series_id:
-            pixel_data, _ = self.read_series(series_id)
-            print(f"{date} (5/{len(pixel_data)} slices chosen uniformly within each scan):")
-            step_size = len(pixel_data) // 4
-
-            fig, axs = plt.subplots(1, 5)
-            for index in range(5):
-                dicom_data = pixel_data[index * step_size]
-                _, _, intercept, slope = get_windowing(dicom_data)
-                image = window_image(dicom_data.pixel_array,
-                                     window_center, window_width, intercept, slope)
-                axs[index].imshow(image, cmap=plt.cm.gray)
-                axs[index].axis("off")
-
-            plt.show()
 
 
 if __name__ == '__main__':
