@@ -2,14 +2,14 @@ import copy
 import torch
 import warnings
 from data import *
-from .utils import *
 from attr import evolve
 from typing import Optional
 from encoders.resnet import *
-from .params import ModelParams
 import pytorch_lightning as pl
 import torch.nn.functional as F
+from moco_lightning.utils import *
 from torch.utils.data import DataLoader
+from moco_lightning.params import ModelParams
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -298,6 +298,8 @@ class LitMoCo(pl.LightningModule):
         # dequeue and enqueue
         if self.hparams.use_negative_examples_from_queue:
             self._dequeue_and_enqueue(k)
+
+        print(f"Finished training step, contrastive loss: {contrastive_loss}")
 
         self.log_dict(log_data)
         return {"loss": contrastive_loss}
