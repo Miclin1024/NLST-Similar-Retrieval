@@ -13,16 +13,18 @@ from moco_lightning.params import ModelParams
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
 from pytorch_lightning.loggers import TensorBoardLogger
+from same_patient.same_patient import *
 
 
 class LitMoCo(pl.LightningModule):
     model: torch.nn.Module
     manager: DatasetManager
     hparams: AttributeDict
+    test_mode: bool = False
     embedding_dim: Optional[int]
     lr_scheduler: Any
 
-    def __init__(self, hparams: Union[ModelParams, dict, None] = None, **kwargs):
+    def __init__(self, hparams: Union[ModelParams, dict, None] = None, test_mode: bool = False, **kwargs):
         super(LitMoCo, self).__init__()
 
         if hparams is None:
@@ -34,6 +36,8 @@ class LitMoCo(pl.LightningModule):
             self.hparams.update(AttributeDict(attrs.asdict(hparams)))
         else:
             self.hparams = AttributeDict(attrs.asdict(hparams))
+        
+        self.test_mode = test_mode
 
         # Check for configuration issues
         if (
@@ -52,7 +56,7 @@ class LitMoCo(pl.LightningModule):
 
         self.manager = DatasetManager(
             int(os.environ.get("MANIFEST_ID")),
-            ds_split=[.7, .2, .1]
+            ds_split=[.7, .2, .1], test_mode=self.test_mode
         )
 
         # if hparams.use_lagging_model:
@@ -196,7 +200,7 @@ class LitMoCo(pl.LightningModule):
 
                 predictions = log_softmax_with_factors(logits / self.hparams.T, neg_factor=neg_factor)
                 return F.nll_loss(predictions, labels)
-
+       
             return F.cross_entropy(logits / self.hparams.T, labels)
 
         new_labels = torch.zeros_like(logits)
@@ -259,6 +263,8 @@ class LitMoCo(pl.LightningModule):
         pos_ip, neg_ip = self._get_pos_neg_ip(emb_q, k)
 
         logits, labels = self._get_contrastive_predictions(q, k)
+      
+       
         if self.hparams.use_vicreg_loss:
             losses = self._get_vicreg_loss(q, k, batch_idx)
             contrastive_loss = losses["loss"]
@@ -298,7 +304,7 @@ class LitMoCo(pl.LightningModule):
         # dequeue and enqueue
         if self.hparams.use_negative_examples_from_queue:
             self._dequeue_and_enqueue(k)
-
+        
         print(f"Finished training step, contrastive loss: {contrastive_loss}")
 
         self.log_dict(log_data)
@@ -493,6 +499,7 @@ class MLP(torch.nn.Module):
 
 if __name__ == '__main__':
     encoder = resnet34(in_channels=1)
+    print("MPS:", torch.has_mps)
     if torch.has_mps:
         base_config = ModelParams(
             encoder=encoder,
@@ -511,11 +518,12 @@ if __name__ == '__main__':
         base_config = ModelParams(
             encoder=encoder,
             embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
-            lr=0.08,
-            batch_size=64,
+            lr=0.008,
+            batch_size=16,
             gather_keys_for_queue=False,
             loss_type="ip",
             use_both_augmentations_as_queries=True,
+            use_negative_examples_from_queue=True,
             mlp_normalization="bn",
             prediction_mlp_layers=2,
             projection_mlp_layers=2,
@@ -531,9 +539,11 @@ if __name__ == '__main__':
             base_config, use_negative_examples_from_queue=True, loss_type="ce", mlp_normalization=None, lr=0.02
         ),
     }
-    for seed in range(3):
+    
+
+    for seed in range(1):
         for name, config in configs.items():
-            method = LitMoCo(config)
+            method = LitMoCo(config, test_mode=True)
             logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
             if torch.has_mps:
                 trainer = pl.Trainer(logger=logger,
@@ -544,7 +554,16 @@ if __name__ == '__main__':
             else:
                 trainer = pl.Trainer(logger=logger,
                                      accelerator="gpu",
+                                     devices=1,
                                      log_every_n_steps=5,
-                                     max_epochs=100,
+                                     max_epochs=20,
                                      )
             trainer.fit(method)
+
+            
+            test_samepatient = TestSamePatient(method=method, val=True)
+            accuracy = test_samepatient.run()
+            with open("same_patient_results.txt", "a") as f:
+                message = f"Configure: {name}, seed: {seed}, accuracy: {accuracy}"
+                f.write(message)
+            print(f"Accuracy rate: {accuracy}")

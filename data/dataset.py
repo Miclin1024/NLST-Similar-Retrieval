@@ -17,6 +17,11 @@ class DatasetManager:
     transform_train: Callable
     transform_validation: Callable
     transform_test: Callable
+    train_series: list[SeriesID]
+    val_series: list[SeriesID]
+    test_series: list[SeriesID]
+    # if True, cut short the metadata list to 100 scans to speed up training and testing of code
+    test_mode: bool = False
 
     @staticmethod
     def default_moco_transform() -> Callable:
@@ -39,34 +44,46 @@ class DatasetManager:
     def __init__(self, manifest: int, ds_split=None,
                  transform_train: Callable = default_moco_transform(),
                  transform_validation: Callable = default_moco_transform(),
-                 transform_test: Callable = default_moco_transform()):
+                 transform_test: Callable = default_moco_transform(),
+                 test_mode: bool = False):
 
         if ds_split is None:
             ds_split = [.8, .2, .0]
 
-        self._reader = NLSTDataReader(manifest)
-        total_length = len(self._reader.series_list)
+        self._reader = NLSTDataReader(manifest, test_mode = test_mode)
+        all_patients = list(self._reader.patient_series_index)
+        total_length = len(all_patients)
+
         train_idx = math.floor(total_length * ds_split[0])
         validation_idx = math.floor(total_length * ds_split[1]) + train_idx
-        series_list = np.random.permutation(self._reader.series_list)
-        split_series = np.split(series_list, [train_idx, validation_idx])
+        
+        patients_list = np.random.permutation(all_patients)
+        split_patients = np.split(patients_list, [train_idx, validation_idx])
+
+        self.transform_train = transform_train
+        self.transform_validation = transform_validation
+        self.transform_test = transform_test
+
+        self.train_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[0]])
+        self.val_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[1]])
+        self.test_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[2]])
 
         self.transform_train = transform_train
         self.transform_validation = transform_validation
         self.transform_test = transform_test
 
         self.train_ds = NLSTDataset(
-            self._reader, effective_series_list=split_series[0], train=True,
-            transform=transform_train
+            self._reader, effective_series_list=self.train_series, train=True,
+            transform=transform_train, patient_ids=split_patients[0]
         )
         self.validation_ds = NLSTDataset(
-            self._reader, effective_series_list=split_series[1], train=False,
-            transform=transform_validation,
+            self._reader, effective_series_list=self.val_series, train=False,
+            transform=transform_validation, patient_ids=split_patients[1]
         )
-        if len(split_series[2]) != 0:
+        if len(self.test_series) != 0:
             self.test_ds = NLSTDataset(
-                self._reader, effective_series_list=split_series[2], train=False,
-                transform=transform_test
+                self._reader, effective_series_list=self.test_series, train=False,
+                transform=transform_test, patient_ids=split_patients[2]
             )
         else:
             self.test_ds = None
@@ -82,7 +99,9 @@ class NLSTDataset(torch.utils.data.Dataset):
     reader: NLSTDataReader
     effective_series_list: list[SeriesID]
     train: bool
+    patient_ids: list[PatientID]
     transform: Optional[Callable] = torch.nn.Identity()
+    
 
     def __len__(self):
         return len(self.effective_series_list)

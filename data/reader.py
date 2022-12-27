@@ -26,8 +26,10 @@ class NLSTDataReader:
     patient_series_index: dict[PatientID, list[SeriesID]]
     series_list: list[SeriesID]
     target_meta_key: str
+    # if True, cut short the metadata list to 100 scans to speed up training and testing of code
+    test_mode: bool = False 
 
-    def __init__(self, manifest: int, target_meta_key: str = "weight"):
+    def __init__(self, manifest: int, target_meta_key: str = "weight", test_mode: bool=False):
         self.metadata = pd.read_csv(
             os.path.join(ROOT_DIR, "metadata/nlst_297_prsn_20170404.csv"),
             dtype={201: "str", 224: "str", 225: "str"}
@@ -49,7 +51,13 @@ class NLSTDataReader:
         # patient on the same date (the scans use different post-processing kernels).
         self.manifest = self.manifest[self.manifest["Number of Images"] > 3]\
             .drop_duplicates(subset=["Subject ID", "Study Date"], keep="first")
-
+        
+        self.test_mode = test_mode
+        
+        # cut the metadata short for testing 
+        if self.test_mode:
+            self.manifest = self.manifest.head(100)
+            
         index = {}
         # Build an index with patient id, scans are ordered by their dates
         # Using iterrows() over itertuple() due to space within column names
@@ -102,6 +110,7 @@ class NLSTDataReader:
         return image, {
             "pid": pid,
             "bmi_category": np.count_nonzero(bmi > bmi_range),
+            "series_id": series_id
         }
 
     def read_patient(self, patient_id: PatientID) -> (tio.Image, dict):
