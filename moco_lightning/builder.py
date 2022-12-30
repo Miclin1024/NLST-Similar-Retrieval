@@ -3,6 +3,7 @@ import torch
 import warnings
 from data import *
 from attr import evolve
+from evaluations import *
 from typing import Optional
 from encoders.resnet import *
 import pytorch_lightning as pl
@@ -13,7 +14,6 @@ from moco_lightning.params import ModelParams
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
 from pytorch_lightning.loggers import TensorBoardLogger
-from same_patient.same_patient import *
 
 
 class LitMoCo(pl.LightningModule):
@@ -22,6 +22,7 @@ class LitMoCo(pl.LightningModule):
     hparams: AttributeDict
     test_mode: bool = False
     embedding_dim: Optional[int]
+    evaluator: SamePatientEvaluator
     lr_scheduler: Any
 
     def __init__(self, hparams: Union[ModelParams, dict, None] = None, test_mode: bool = False, **kwargs):
@@ -56,8 +57,11 @@ class LitMoCo(pl.LightningModule):
 
         self.manager = DatasetManager(
             int(os.environ.get("MANIFEST_ID")),
-            ds_split=[.7, .2, .1], test_mode=self.test_mode
+            ds_split=[.7, .05, .25], test_mode=self.test_mode
         )
+        
+        self.evaluator = SamePatientEvaluator(
+            self.model, self.manager._reader)
 
         # if hparams.use_lagging_model:
         #     # "key" function (no grad)
@@ -305,42 +309,45 @@ class LitMoCo(pl.LightningModule):
         if self.hparams.use_negative_examples_from_queue:
             self._dequeue_and_enqueue(k)
         
-        print(f"Finished training step, contrastive loss: {contrastive_loss}")
+        # print(f"Finished training step, contrastive loss: {contrastive_loss}")
 
         self.log_dict(log_data)
         return {"loss": contrastive_loss}
 
     def validation_step(self, batch, batch_idx):
-        x, class_labels = batch
-        with torch.no_grad():
-            emb = self.model(x)
-            emb = emb.view(self.hparams.batch_size, self.hparams.embedding_dim)
+        pass
+        # x, class_labels = batch
+        # with torch.no_grad():
+        #     emb = self.model(x)
+        #     emb = emb.view(self.hparams.batch_size, self.hparams.embedding_dim)
 
-        return {"emb": emb, "labels": class_labels["bmi_category"]}
+        # return {"emb": emb, "labels": class_labels["bmi_category"], "series_id": class_labels["series_id"]}
 
     def validation_epoch_end(self, outputs):
-        embeddings = torch.cat([x["emb"] for x in outputs]).cpu().detach().numpy()
-        labels = torch.cat([x["labels"] for x in outputs]).cpu().detach().numpy()
-        num_split_linear = embeddings.shape[0] // 2
-        self.sklearn_classifier.fit(embeddings[:num_split_linear], labels[:num_split_linear])
-        train_accuracy = self.sklearn_classifier.score(
-            embeddings[:num_split_linear],
-            labels[:num_split_linear]
-        ) * 100
-        valid_accuracy = self.sklearn_classifier.score(
-            embeddings[num_split_linear:],
-            labels[num_split_linear:]
-        ) * 100
+        # embeddings = torch.cat([x["emb"] for x in outputs]).cpu().detach().numpy()
+        # labels = torch.cat([x["labels"] for x in outputs]).cpu().detach().numpy()
+        # num_split_linear = embeddings.shape[0] // 2
+        # self.sklearn_classifier.fit(embeddings[:num_split_linear], labels[:num_split_linear])
+        # train_accuracy = self.sklearn_classifier.score(
+        #     embeddings[:num_split_linear],
+        #     labels[:num_split_linear]
+        # ) * 100
+        # valid_accuracy = self.sklearn_classifier.score(
+        #     embeddings[num_split_linear:],
+        #     labels[num_split_linear:]
+        # ) * 100
 
-        log_data = {
-            "epoch": float(self.current_epoch),
-            "train_class_acc": train_accuracy,
-            "valid_class_acc": valid_accuracy,
-            "T": self._get_temp(),
-            "m": self._get_m(),
-        }
-        print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
-        self.log_dict(log_data, sync_dist=True)
+        # log_data = {
+        #     "epoch": float(self.current_epoch),
+        #     "train_class_acc": train_accuracy,
+        #     "valid_class_acc": valid_accuracy,
+        #     "T": self._get_temp(),
+        #     "m": self._get_m(),
+        # }
+        # print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
+        # self.log_dict(log_data, sync_dist=True)
+        
+        self.evaluator.score(self.manager.validation_ds.effective_series_list)
 
     def configure_optimizers(self):
         # exclude bias and batch norm from LARS and weight decay
@@ -499,11 +506,16 @@ class MLP(torch.nn.Module):
 
 if __name__ == '__main__':
     encoder = resnet34(in_channels=1)
-    print("MPS:", torch.has_mps)
+    mlp_embedding_dim = encoder.blocks[-1].blocks[-1].expanded_channels * 64 
+    mlp_output_dim = int(mlp_embedding_dim / 32)
+    mlp_hidden_dim = int(mlp_embedding_dim / 16)
+    
     if torch.has_mps:
         base_config = ModelParams(
             encoder=encoder,
-            embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
+            embedding_dim=mlp_embedding_dim,
+            dim=mlp_output_dim,
+            mlp_hidden_dim=mlp_hidden_dim,
             lr=0.08,
             batch_size=16,
             gather_keys_for_queue=False,
@@ -517,7 +529,9 @@ if __name__ == '__main__':
     else:
         base_config = ModelParams(
             encoder=encoder,
-            embedding_dim=encoder.blocks[-1].blocks[-1].expanded_channels * 64,
+            embedding_dim=mlp_embedding_dim,
+            dim=mlp_output_dim,
+            mlp_hidden_dim=mlp_hidden_dim,
             lr=0.008,
             batch_size=16,
             gather_keys_for_queue=False,
@@ -543,7 +557,7 @@ if __name__ == '__main__':
 
     for seed in range(1):
         for name, config in configs.items():
-            method = LitMoCo(config, test_mode=True)
+            method = LitMoCo(config, test_mode=False)
             logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
             if torch.has_mps:
                 trainer = pl.Trainer(logger=logger,
@@ -561,9 +575,9 @@ if __name__ == '__main__':
             trainer.fit(method)
 
             
-            test_samepatient = TestSamePatient(method=method, val=True)
-            accuracy = test_samepatient.run()
-            with open("same_patient_results.txt", "a") as f:
-                message = f"Configure: {name}, seed: {seed}, accuracy: {accuracy}"
-                f.write(message)
-            print(f"Accuracy rate: {accuracy}")
+            # test_samepatient = SamePatientEval(method=method, val=True)
+            # accuracy = test_samepatient.run()
+            # with open("same_patient_results.txt", "a") as f:
+            #     message = f"Configure: {name}, seed: {seed}, accuracy: {accuracy}"
+            #     f.write(message)
+            # print(f"Accuracy rate: {accuracy}")

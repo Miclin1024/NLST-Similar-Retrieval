@@ -66,8 +66,12 @@ class DatasetManager:
 
         self.train_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[0]])
         self.val_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[1]])
-        self.test_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[2]])
 
+        if ds_split[-1] > 0: 
+            self.test_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[2]])
+        else:
+            self.test_series = []
+        
         self.transform_train = transform_train
         self.transform_validation = transform_validation
         self.transform_test = transform_test
@@ -124,4 +128,9 @@ class NLSTDataset(torch.utils.data.Dataset):
 
 
 if __name__ == '__main__':
-    manager = DatasetManager(manifest=1663396252954)
+    manager = DatasetManager(manifest=1632928843386)
+    
+    # TODO: test whether the patients were properly split 
+    overlap = list(set(manager.train_series) & set(manager.val_series))
+    print(f"Overlap between train and validation: {overlap}")
+

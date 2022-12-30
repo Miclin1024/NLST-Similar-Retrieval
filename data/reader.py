@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from utils import *
 import torchio as tio
+from typing import Tuple
 from definitions import *
 from pydicom import dcmread
 from dotenv import load_dotenv
@@ -87,7 +88,7 @@ class NLSTDataReader:
     def __len__(self):
         return len(self.series_list)
 
-    def read_series(self, series_id: SeriesID) -> (tio.Image, dict):
+    def read_series(self, series_id: SeriesID) -> Tuple[tio.Image, dict]:
         manifest_row = self.manifest[self.manifest["Series UID"] == series_id].iloc[0].to_dict()
         path = manifest_row["File Location"]
         series_folder = os.path.join(self.manifest_folder, path)
@@ -113,7 +114,7 @@ class NLSTDataReader:
             "series_id": series_id
         }
 
-    def read_patient(self, patient_id: PatientID) -> (tio.Image, dict):
+    def read_patient(self, patient_id: PatientID) -> Tuple[tio.Image, dict]:
         patient_series_list = self.patient_series_index[patient_id]
         return self.read_series(patient_series_list[0])
 
