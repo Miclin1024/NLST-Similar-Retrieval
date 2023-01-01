@@ -6,15 +6,27 @@ from definitions import *
 from data import NLSTDataReader
 from torch.nn import CosineSimilarity
 
+TOP_NO_SIMILAR: int = 10
 
-@attrs.define()
+@attrs.define(init=False)
 class SamePatientEvaluator:
     
     encoder: torch.nn.Module
     reader: NLSTDataReader
+    log_predictions: dict[SeriesID, list[SeriesID]]
+    series_correct_pred: list[SeriesID]
+    
+    def __init__(self, encoder: torch.nn.Module, reader: NLSTDataReader) -> None:
+        self.encoder = encoder
+        self.reader = reader
     
     @torch.no_grad()
-    def score(self, series_ids: list[SeriesID]):
+    def score(self, series_ids: list[SeriesID], log_similar_scans = False) -> float:
+        """
+        Evaluate the same patient prediction performance of the encoder. The encoder will be given 
+        single 4D tensors (1, C, W, H, D).
+        """
+
         n = len(series_ids)
         cos = CosineSimilarity(dim=1)
         
@@ -43,12 +55,22 @@ class SamePatientEvaluator:
                 similarity_matrix[j, i] = similarity
         
         correct_count = 0
-        for i in range(n):
-            pred = np.argmax(similarity_matrix[i])
-            pred = patient_ids_embeddings[pred][0]
-            if pred == patient_ids_embeddings[i][0]:
-                correct_count += 1
+        
+        if log_similar_scans:
+            for i in range(n):
+                sorted_by_similarity = np.argsort(similarity_matrix[i])[::-1]
                 
+                # index of most similar scan
+                pred_idx = sorted_by_similarity[0] 
+                pred = patient_ids_embeddings[pred_idx][0]
+                if pred == patient_ids_embeddings[i][0]:
+                    correct_count += 1
+                    self.series_correct_pred.append(series_ids[i])
+
+                # for each scan, log the top 10 most similar scans
+                curr_series = series_ids[i]            
+                self.log_predictions[curr_series] = series_ids[sorted_by_similarity[:TOP_NO_SIMILAR]]
+
         accuracy = round(correct_count / n, 5)
                
         np.set_printoptions(precision=3) 
@@ -56,3 +78,28 @@ class SamePatientEvaluator:
         print(f"Same patient prediction accuracy (n={n}): {accuracy * 100}%")
                 
         return accuracy
+
+    def get_most_similar_scan(self, series_id: SeriesID) -> SeriesID:
+        '''Return series id of the top 1 similar scan.'''
+        
+        if series_id in self.log_predictions:
+            return self.log_predictions[series_id][0]
+        
+        else:
+            raise ValueError(f"No predictions available for series ID {series_id}.")
+
+    def get_top_N_similar_scans(self, series_id: SeriesID, N: int = 10) -> list[SeriesID]:
+        '''Return a list top N similar scans.'''
+        
+        if series_id in self.log_predictions:
+            if N > TOP_NO_SIMILAR:
+                print(f"This log currently only records the top {TOP_NO_SIMILAR} similar scans.")
+            elif N < 1:
+                raise ValueError(f"N must be at least 1.")
+            else:
+                return self.log_predictions[series_id][:N]
+
+        else:
+            raise ValueError(f"No predictions available for series ID {series_id}.")
+    
+    # TODO: get loggers to log after each epoch, what series ids were correctly identified. 

@@ -92,6 +92,11 @@ class DatasetManager:
         else:
             self.test_ds = None
 
+        overlap = list(set(split_patients[0]) & set(split_patients[1]))
+        print(f"Overlap: {overlap}")
+        print(split_patients[0])
+        print(split_patients[1])
+
     @property
     def instance_shape(self):
         instance = next(iter(self.train_ds))[0]
@@ -130,7 +135,5 @@ class NLSTDataset(torch.utils.data.Dataset):
 if __name__ == '__main__':
     manager = DatasetManager(manifest=1632928843386)
     
-    # TODO: test whether the patients were properly split 
-    overlap = list(set(manager.train_series) & set(manager.val_series))
-    print(f"Overlap between train and validation: {overlap}")
+
 
