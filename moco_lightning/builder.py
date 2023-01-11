@@ -2,6 +2,7 @@ import copy
 import torch
 import warnings
 from data import *
+from ray import tune
 from attr import evolve
 from evaluations import *
 from typing import Optional
@@ -14,6 +15,8 @@ from moco_lightning.params import ModelParams
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
 from pytorch_lightning.loggers import TensorBoardLogger
+from ray.tune.integration.pytorch_lightning import TuneReportCallback
+
 
 
 class LitMoCo(pl.LightningModule):
@@ -347,7 +350,8 @@ class LitMoCo(pl.LightningModule):
         # print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
         # self.log_dict(log_data, sync_dist=True)
         
-        self.evaluator.score(self.manager.validation_ds.effective_series_list)
+        acc = self.evaluator.score(self.manager.validation_ds.effective_series_list)
+        self.log("similar_scan_acc", acc)
 
     def configure_optimizers(self):
         # exclude bias and batch norm from LARS and weight decay
@@ -553,31 +557,55 @@ if __name__ == '__main__':
             base_config, use_negative_examples_from_queue=True, loss_type="ce", mlp_normalization=None, lr=0.02
         ),
     }
-    
 
-    for seed in range(1):
-        for name, config in configs.items():
-            method = LitMoCo(config, test_mode=False)
-            logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
-            if torch.has_mps:
-                trainer = pl.Trainer(logger=logger,
-                                     accelerator="cpu",
-                                     log_every_n_steps=1,
-                                     max_epochs=100,
-                                     )
-            else:
-                trainer = pl.Trainer(logger=logger,
-                                     accelerator="gpu",
-                                     devices=1,
-                                     log_every_n_steps=5,
-                                     max_epochs=20,
-                                     )
-            trainer.fit(method)
+    # space for hyperparameter searching
+    hyperparam_tune_config = {
+        "lr": tune.loguniform(1e-4, 1e-1)
+    }
+
+    def train_wrapper(configs):
+
+        # metrics to report to tune ray
+        metrics = ["similar_scan_acc"]
+
+        method = LitMoCo(configs["base"], test_mode=False)
+        logger = TensorBoardLogger("tb_logs", name=f"base")
+
+
+        trainer = pl.Trainer(logger=logger,
+                    accelerator="gpu",
+                    devices=1,
+                    log_every_n_steps=5,
+                    max_epochs=20,
+                    callbacks=[TuneReportCallback(metrics, on="validation_end")]
+                    )
+
+    analysis = tune.run(tune.with_parameters(train_wrapper, epochs=20, gpus=1),
+        config=hyperparam_tune_config,
+        num_samples=5)
+    
+    print(analysis.best_config)
+
+
+
+        # for seed in range(1):
+        #     for name, config in configs.items():
+        #         method = LitMoCo(config, test_mode=False)
+        #         logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
+        #         if torch.has_mps:
+        #             trainer = pl.Trainer(logger=logger,
+        #                                 accelerator="cpu",
+        #                                 log_every_n_steps=1,
+        #                                 max_epochs=100,
+        #                                 )
+        #         else:
+        #             trainer = pl.Trainer(logger=logger,
+        #                                 accelerator="gpu",
+        #                                 devices=1,
+        #                                 log_every_n_steps=5,
+        #                                 max_epochs=20,
+        #                                 callbacks=[TuneReportCallback(metrics, on="validation_end")]
+        #                                 )
+        #         trainer.fit(method)
 
             
-            # test_samepatient = SamePatientEval(method=method, val=True)
-            # accuracy = test_samepatient.run()
-            # with open("same_patient_results.txt", "a") as f:
-            #     message = f"Configure: {name}, seed: {seed}, accuracy: {accuracy}"
-            #     f.write(message)
-            # print(f"Accuracy rate: {accuracy}")
