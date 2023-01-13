@@ -563,14 +563,13 @@ if __name__ == '__main__':
         "lr": tune.loguniform(1e-4, 1e-1)
     }
 
-    def train_wrapper(configs):
+    def train_wrapper(config):
 
         # metrics to report to tune ray
         metrics = ["similar_scan_acc"]
 
-        method = LitMoCo(configs["base"], test_mode=False)
+        method = LitMoCo(config["base"], test_mode=False)
         logger = TensorBoardLogger("tb_logs", name=f"base")
-
 
         trainer = pl.Trainer(logger=logger,
                     accelerator="gpu",
@@ -579,12 +578,14 @@ if __name__ == '__main__':
                     max_epochs=20,
                     callbacks=[TuneReportCallback(metrics, on="validation_end")]
                     )
+        
+        trainer.fit(method)
 
-    analysis = tune.run(tune.with_parameters(train_wrapper, epochs=20, gpus=1),
+    analysis = tune.run(train_wrapper,
         config=hyperparam_tune_config,
         num_samples=5)
     
-    print(analysis.best_config)
+    # print(analysis.best_config)
 
 
 

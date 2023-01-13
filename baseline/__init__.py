@@ -1,4 +1,5 @@
-from .resnet_pretrained import ResNetSliceWiseEncoder
+from .slicewise import ResNetSliceWiseEncoder
+from .video import ResNetVideoEncoder
 
 
     
