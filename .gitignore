@@ -186,3 +186,4 @@ cython_debug/
 data/*/*
 .DS_Store
 tb_logs/
+logs/
