@@ -17,6 +17,10 @@ class ResNetVideoEncoder(torch.nn.Module):
             weights=models.video.R3D_18_Weights.DEFAULT if pretrained else None
         ).to("cuda")
         self.pretrained = pretrained
+
+    @property
+    def name(self) -> str:
+        return f"r3d_18_{'pretrained' if self.pretrained else 'random'}"
         
     @property
     def description(self) -> str:

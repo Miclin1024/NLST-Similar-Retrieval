@@ -558,55 +558,24 @@ if __name__ == '__main__':
         ),
     }
 
-    # space for hyperparameter searching
-    hyperparam_tune_config = {
-        "lr": tune.loguniform(1e-4, 1e-1)
-    }
-
-    def train_wrapper(config):
-
-        # metrics to report to tune ray
-        metrics = ["similar_scan_acc"]
-
-        method = LitMoCo(config["base"], test_mode=False)
-        logger = TensorBoardLogger("tb_logs", name=f"base")
-
-        trainer = pl.Trainer(logger=logger,
-                    accelerator="gpu",
-                    devices=1,
-                    log_every_n_steps=5,
-                    max_epochs=20,
-                    callbacks=[TuneReportCallback(metrics, on="validation_end")]
-                    )
-        
-        trainer.fit(method)
-
-    analysis = tune.run(train_wrapper,
-        config=hyperparam_tune_config,
-        num_samples=5)
-    
-    # print(analysis.best_config)
-
-
-
-        # for seed in range(1):
-        #     for name, config in configs.items():
-        #         method = LitMoCo(config, test_mode=False)
-        #         logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
-        #         if torch.has_mps:
-        #             trainer = pl.Trainer(logger=logger,
-        #                                 accelerator="cpu",
-        #                                 log_every_n_steps=1,
-        #                                 max_epochs=100,
-        #                                 )
-        #         else:
-        #             trainer = pl.Trainer(logger=logger,
-        #                                 accelerator="gpu",
-        #                                 devices=1,
-        #                                 log_every_n_steps=5,
-        #                                 max_epochs=20,
-        #                                 callbacks=[TuneReportCallback(metrics, on="validation_end")]
-        #                                 )
-        #         trainer.fit(method)
+    for seed in range(1):
+        for name, config in configs.items():
+            method = LitMoCo(config, test_mode=False)
+            logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
+            if torch.has_mps:
+                trainer = pl.Trainer(logger=logger,
+                                    accelerator="cpu",
+                                    log_every_n_steps=1,
+                                    max_epochs=100,
+                                    )
+            else:
+                trainer = pl.Trainer(logger=logger,
+                                    accelerator="gpu",
+                                    devices=1,
+                                    log_every_n_steps=5,
+                                    max_epochs=20,
+                                    callbacks=[TuneReportCallback(metrics, on="validation_end")]
+                                    )
+            trainer.fit(method)
 
             

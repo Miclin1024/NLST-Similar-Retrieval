@@ -16,7 +16,10 @@
             "type": "python",
             "request": "launch",
             "module": "baseline",
-            "justMyCode": true
+            "justMyCode": true,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "1"
+            }
         },
     ]
 }

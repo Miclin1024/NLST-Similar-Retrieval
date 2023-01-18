@@ -2,6 +2,7 @@ import torch
 import attrs
 from torchvision import models
 
+
 @attrs.define(slots=True, init=False)
 class ResNetSliceWiseEncoder(torch.nn.Module):
     
@@ -10,18 +11,22 @@ class ResNetSliceWiseEncoder(torch.nn.Module):
     encoder: torch.nn.Module
     
     pretrained: bool
-    
+
     def __init__(self, pretrained=True) -> None:
         super().__init__()
         self.encoder = models.resnet34(
             weights=models.ResNet34_Weights.DEFAULT if pretrained else None
         ).to("cuda")
         self.pretrained = pretrained
-        
+
+    @property
+    def name(self) -> str:
+        return f"resnet_2d_{'pretrained' if self.pretrained else 'random'}"
+
     @property
     def description(self) -> str:
         return f"slice wise ResNet encoder with " \
-               f"{'pretrained' if self.pretrained else 'random'} weights + global max pool" \
+               f"{'pretrained' if self.pretrained else 'random'} weights + global max pool"
     
     def forward(self, x):
         outputs = []
