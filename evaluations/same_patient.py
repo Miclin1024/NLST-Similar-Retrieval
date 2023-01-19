@@ -75,7 +75,7 @@ class SamePatientEvaluator:
                 input_images.append(image.data)
                 input_pids.append(metadata["pid"])
             
-            input_batch = torch.stack(input_images, dim=0).to("cuda")
+            input_batch = torch.stack(input_images, dim=0).to("cuda").to(torch.float)
             embeddings = self.encoder(input_batch).view(effective_batch_size, -1)
             
             for i, pid in enumerate(input_pids):

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from utils import *
 import torchio as tio
+from tqdm import tqdm
 from typing import Tuple
 from definitions import *
 from pydicom import dcmread
@@ -17,6 +18,9 @@ import matplotlib.pyplot as plt
 # Use a .env file to indicate where the manifests are stored
 load_dotenv()
 DATA_FOLDER = os.getenv("DATA_FOLDER") or "data/"
+
+PREPROCESS_FOLDER = os.path.join(ROOT_DIR, "data", "cache")
+os.makedirs(PREPROCESS_FOLDER, exist_ok=True)
 
 
 @attrs.define(slots=True, auto_attribs=True, init=False)
@@ -30,11 +34,12 @@ class NLSTDataReader:
     # if True, cut short the metadata list to 100 scans to speed up training and testing of code
     test_mode: bool = False 
 
-    def __init__(self, manifest: int, target_meta_key: str = "weight", test_mode: bool=False):
+    def __init__(self, manifest: int, target_meta_key: str = "weight", test_mode: bool = False):
         self.metadata = pd.read_csv(
             os.path.join(ROOT_DIR, "metadata/nlst_297_prsn_20170404.csv"),
             dtype={201: "str", 224: "str", 225: "str"}
         )
+        self.metadata.set_index("pid", inplace=True)
         self.target_meta_key = target_meta_key
 
         manifest_folder = glob.glob(f"{DATA_FOLDER}manifest*{manifest}", recursive=False)
@@ -52,6 +57,8 @@ class NLSTDataReader:
         # patient on the same date (the scans use different post-processing kernels).
         self.manifest = self.manifest[self.manifest["Number of Images"] > 3]\
             .drop_duplicates(subset=["Subject ID", "Study Date"], keep="first")
+
+        self.manifest.set_index("Series UID", inplace=True)
         
         self.test_mode = test_mode
         
@@ -62,12 +69,11 @@ class NLSTDataReader:
         index = {}
         # Build an index with patient id, scans are ordered by their dates
         # Using iterrows() over itertuple() due to space within column names
-        for _, row in self.manifest.iterrows():
+        for series_id, row in self.manifest.iterrows():
             patient_id = row["Subject ID"]
             if patient_id not in index.keys():
                 index[patient_id] = []
             year = int(row["Study Date"].split("-")[-1])
-            series_id = row["Series UID"]
             insert_loc = 0
             for _, current_year in index[patient_id]:
                 if current_year < year:
@@ -88,14 +94,28 @@ class NLSTDataReader:
     def __len__(self):
         return len(self.series_list)
 
+    def perform_preprocessing(self):
+        for series_id in tqdm(
+                self.series_list,
+                desc="Preprocessing original data and save for later"
+        ):
+            cache_path = os.path.join(PREPROCESS_FOLDER, f"{series_id}.nii.gz")
+            # Assume no need to update if file exists
+            if os.path.isfile(cache_path):
+                continue
+            manifest_row = self.manifest.loc[series_id].to_dict()
+            path = manifest_row["File Location"]
+            series_folder = os.path.join(self.manifest_folder, path)
+            image = self.preprocess(tio.ScalarImage(series_folder))
+            image.save(cache_path)
+
     def read_series(self, series_id: SeriesID) -> Tuple[tio.Image, dict]:
-        manifest_row = self.manifest[self.manifest["Series UID"] == series_id].iloc[0].to_dict()
-        path = manifest_row["File Location"]
-        series_folder = os.path.join(self.manifest_folder, path)
-        image = self.preprocess(tio.ScalarImage(series_folder))
+        manifest_row = self.manifest.loc[series_id].to_dict()
+        path = os.path.join(PREPROCESS_FOLDER, f"{series_id}.nii.gz")
+        image = tio.ScalarImage(path)
 
         pid: PatientID = manifest_row["Subject ID"]
-        metadata_row = self.metadata[self.metadata["pid"] == pid].iloc[0].to_dict()
+        metadata_row = self.metadata.loc[pid].to_dict()
 
         weight = metadata_row["weight"]
         if np.isnan(weight):
@@ -131,4 +151,3 @@ class NLSTDataReader:
 if __name__ == '__main__':
     dataset = NLSTDataReader(manifest=1663396252954)
     print(dataset.read_series(dataset.series_list[0]))
-

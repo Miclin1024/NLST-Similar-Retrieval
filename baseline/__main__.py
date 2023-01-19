@@ -16,13 +16,13 @@ encoders = [
     ResNetVideoEncoder(pretrained=False),
     ResNetVideoEncoder(pretrained=True),
 ]
-for encoder in encoders:
-    print(f"---------------------------------------------")
-    print(f"Begin evaluating model: {encoder.description}")
-    evaluator = SamePatientEvaluator(encoder=encoder, reader=reader)
-    log_file = SamePatientEvaluator.create_log_file(encoder.name, 0, 0)
-    evaluator.score(reader.series_list, log_file)
-    log_file.close()
+# for encoder in encoders:
+#     print(f"---------------------------------------------")
+#     print(f"Begin evaluating model: {encoder.description}")
+#     evaluator = SamePatientEvaluator(encoder=encoder, reader=reader)
+#     log_file = SamePatientEvaluator.create_log_file(encoder.name, 0, 0)
+#     evaluator.score(reader.series_list, log_file)
+#     log_file.close()
     
 print(f"---------------------------------------------")
 reader = NLSTDataReader(
