@@ -25,8 +25,8 @@ class ResNetVideoEncoder(torch.nn.Module):
     @property
     def description(self) -> str:
         return f"video ResNet encoder with " \
-               f"{'pretrained' if self.pretrained else 'random'} weights" \
-        
+               f"{'pretrained' if self.pretrained else 'random'} weights"
+
     def forward(self, x):
         x = x.repeat(1, 3, 1, 1, 1)
         return self.encoder(x)

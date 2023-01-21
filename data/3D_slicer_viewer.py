@@ -21,6 +21,7 @@ class OrganizeLog_3DSlicer_View():
 
         '''Organize scans as recorded from a log table into a folder to upload onto
         3D Slicer for viewing.'''
+
         
         for _, r in tqdm(log_table.iterrows(), desc=f"Copying files from log table {log_table_name}"):
             
@@ -28,8 +29,10 @@ class OrganizeLog_3DSlicer_View():
             col_names = ["SID"] + [f"SMLR_{i}" for i in range(SIMILAR_LOG_TOP_SCAN_RETRIEVAL_SIZE)]
             query_scan_id = row["SID"]
 
+
             for col in col_names:
                 id = row[col]
+                print("id", id)
             
                 manifest_row = self.nlst_reader.manifest.loc[id].to_dict()
                 path = manifest_row["File Location"]
@@ -44,6 +47,7 @@ class OrganizeLog_3DSlicer_View():
 
                 prefix = "[query_scan]" if col == "SID" else f"[{col}]"
                 new_loc = os.path.join(ROOT_DIR, "data", "3D_slicer", log_table_name, query_scan_id, f"{prefix}_{id}")
+                print(new_loc)
                 copytree(src=series_folder, dst=new_loc)
     
     def return_pid_logs(self, log_table: pd.DataFrame) -> pd.DataFrame:
@@ -69,12 +73,18 @@ if __name__ == '__main__':
 
     models = ["resnet_2d_random_v0", "r3d_18_random_v0", "r3d_18_pretrained_v0"]
     
-    # for i, model in enumerate(models):
-    #     log = pd.read_csv(os.path.join(ROOT_DIR,f"logs/same_patient/{models[i]}/0.csv"))
+    #for i, model in enumerate(["r3d_18_pretrained_v0"]):
+    log = pd.read_csv(os.path.join(ROOT_DIR,f"logs/same_patient/r3d_18_pretrained_v0/0.csv"))
+    organizer.organize_scans(log_table=log, log_table_name="r3d_18_pretrained_v0")
 
-    #     organizer.nlst_reader.manifest.loc[id]
-        # organizer.organize_scans(log_table=log, log_table_name=model)
+    # log = pd.read_csv(os.path.join(ROOT_DIR,f"logs/same_patient/{models[1]}/0.csv"))
+    # print(organizer.return_pid_logs(log))
 
 
-    log = pd.read_csv(os.path.join(ROOT_DIR,f"logs/same_patient/{models[2]}/0.csv"))
-    print(organizer.return_pid_logs(log))
+
+#      SMLR_0_pid  SMLR_1_pid  SMLR_2_pid  SMLR_3_pid  SMLR_4_pid  query_pid
+# 0      100014      100051      100014      100012      100075     100012
+# 1      100032      100032      100032      100020      100058     100043
+# 2      100043      100004      100009      100020      100065     100043
+# 3      100056      100056      100031      100075      100014     100056
+# 4      100058      100032      100032      100043      100032     100058

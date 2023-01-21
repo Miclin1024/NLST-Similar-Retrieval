@@ -3,10 +3,9 @@ import torch
 import warnings
 from data import *
 from ray import tune
-from attr import evolve
 from evaluations import *
 from typing import Optional
-from encoders.resnet import *
+from functools import partial
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from moco_lightning.utils import *
@@ -14,9 +13,6 @@ from torch.utils.data import DataLoader
 from moco_lightning.params import ModelParams
 from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
-from pytorch_lightning.loggers import TensorBoardLogger
-from ray.tune.integration.pytorch_lightning import TuneReportCallback
-
 
 
 class LitMoCo(pl.LightningModule):
@@ -135,7 +131,6 @@ class LitMoCo(pl.LightningModule):
         im_k = x[:, 1].contiguous()
 
         # compute query features
-
         emb_q = self.model(im_q)
         emb_q = emb_q.view(self.hparams.batch_size, self.hparams.embedding_dim)
         q_projection = self.projection_model(emb_q)
@@ -270,7 +265,6 @@ class LitMoCo(pl.LightningModule):
         pos_ip, neg_ip = self._get_pos_neg_ip(emb_q, k)
 
         logits, labels = self._get_contrastive_predictions(q, k)
-      
        
         if self.hparams.use_vicreg_loss:
             losses = self._get_vicreg_loss(q, k, batch_idx)
@@ -311,8 +305,6 @@ class LitMoCo(pl.LightningModule):
         # dequeue and enqueue
         if self.hparams.use_negative_examples_from_queue:
             self._dequeue_and_enqueue(k)
-        
-        # print(f"Finished training step, contrastive loss: {contrastive_loss}")
 
         self.log_dict(log_data)
         return {"loss": contrastive_loss}
@@ -349,9 +341,10 @@ class LitMoCo(pl.LightningModule):
         # }
         # print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
         # self.log_dict(log_data, sync_dist=True)
-        
-        acc = self.evaluator.score(self.manager.validation_ds.effective_series_list)
+        log_file = self.evaluator.create_log_file("resnet_34_moco", 0, self.current_epoch)
+        acc = self.evaluator.score(self.manager.validation_ds.effective_series_list, log_file)
         self.log("similar_scan_acc", acc)
+        log_file.close()
 
     def configure_optimizers(self):
         # exclude bias and batch norm from LARS and weight decay
@@ -506,76 +499,3 @@ class MLP(torch.nn.Module):
             return partial(torch.nn.GroupNorm, num_channels=hparams.mlp_hidden_dim, num_groups=32)
         else:
             raise NotImplementedError(f"mlp normalization {normalization_str} not implemented")
-
-
-if __name__ == '__main__':
-    encoder = resnet34(in_channels=1)
-    mlp_embedding_dim = encoder.blocks[-1].blocks[-1].expanded_channels * 64 
-    mlp_output_dim = int(mlp_embedding_dim / 32)
-    mlp_hidden_dim = int(mlp_embedding_dim / 16)
-    
-    if torch.has_mps:
-        base_config = ModelParams(
-            encoder=encoder,
-            embedding_dim=mlp_embedding_dim,
-            dim=mlp_output_dim,
-            mlp_hidden_dim=mlp_hidden_dim,
-            lr=0.08,
-            batch_size=16,
-            gather_keys_for_queue=False,
-            loss_type="ip",
-            use_both_augmentations_as_queries=True,
-            mlp_normalization="bn",
-            prediction_mlp_layers=2,
-            projection_mlp_layers=2,
-            m=0.996,
-        )
-    else:
-        base_config = ModelParams(
-            encoder=encoder,
-            embedding_dim=mlp_embedding_dim,
-            dim=mlp_output_dim,
-            mlp_hidden_dim=mlp_hidden_dim,
-            lr=0.008,
-            batch_size=16,
-            gather_keys_for_queue=False,
-            loss_type="ip",
-            use_both_augmentations_as_queries=True,
-            use_negative_examples_from_queue=True,
-            mlp_normalization="bn",
-            prediction_mlp_layers=2,
-            projection_mlp_layers=2,
-            m=0.996,
-        )
-    configs = {
-        "base": base_config,
-        "pred_only": evolve(base_config, mlp_normalization=None, prediction_mlp_normalization="bn"),
-        "proj_only": evolve(base_config, mlp_normalization="bn", prediction_mlp_normalization=None),
-        "no_norm": evolve(base_config, mlp_normalization=None),
-        "layer_norm": evolve(base_config, mlp_normalization="ln"),
-        "xent": evolve(
-            base_config, use_negative_examples_from_queue=True, loss_type="ce", mlp_normalization=None, lr=0.02
-        ),
-    }
-
-    for seed in range(1):
-        for name, config in configs.items():
-            method = LitMoCo(config, test_mode=False)
-            logger = TensorBoardLogger("tb_logs", name=f"{name}_{seed}")
-            if torch.has_mps:
-                trainer = pl.Trainer(logger=logger,
-                                    accelerator="cpu",
-                                    log_every_n_steps=1,
-                                    max_epochs=100,
-                                    )
-            else:
-                trainer = pl.Trainer(logger=logger,
-                                    accelerator="gpu",
-                                    devices=1,
-                                    log_every_n_steps=5,
-                                    max_epochs=20,
-                                    callbacks=[TuneReportCallback(metrics, on="validation_end")]
-                                    )
-            trainer.fit(method)
-
-            

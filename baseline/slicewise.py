@@ -46,7 +46,4 @@ class ResNetSliceWiseEncoder(torch.nn.Module):
         num_slices = x.shape[4]
         for i in range(num_slices):
             yield x[:, :, :, i]
-    
-    
-    
 

@@ -1,5 +1,6 @@
 import math
 import attrs
+import itertools
 import numpy as np
 from definitions import *
 import torchio as tio
@@ -8,7 +9,6 @@ from typing import Optional, Callable
 from data.reader import NLSTDataReader
 
 
-@attrs.define(auto_attribs=True, slots=True, init=False)
 class DatasetManager:
     _reader: NLSTDataReader
     train_ds: torch.utils.data.Dataset
@@ -50,25 +50,30 @@ class DatasetManager:
         if ds_split is None:
             ds_split = [.8, .2, .0]
 
-        self._reader = NLSTDataReader(manifest, test_mode = test_mode)
-        all_patients = list(self._reader.patient_series_index)
-        total_length = len(all_patients)
+        self._reader = NLSTDataReader(manifest, test_mode=test_mode)
+        patient_index = self._reader.patient_series_index
+        patients_list = list(patient_index.keys())
+        np.random.shuffle(patients_list)
+        patients_count = len(patients_list)
 
-        train_idx = math.floor(total_length * ds_split[0])
-        validation_idx = math.floor(total_length * ds_split[1]) + train_idx
-        
-        patients_list = np.random.permutation(all_patients)
-        split_patients = np.split(patients_list, [train_idx, validation_idx])
+        train_idx = math.floor(patients_count * ds_split[0])
+        validation_idx = math.floor(patients_count * ds_split[1]) + train_idx
 
         self.transform_train = transform_train
         self.transform_validation = transform_validation
         self.transform_test = transform_test
 
-        self.train_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[0]])
-        self.val_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[1]])
+        self.train_series = list(itertools.chain(
+            *[patient_index[pid] for pid in patients_list[:train_idx]]
+        ))
+        self.val_series = list(itertools.chain(
+            *[patient_index[pid] for pid in patients_list[train_idx:validation_idx]]
+        ))
 
-        if ds_split[-1] > 0: 
-            self.test_series = np.concatenate([self._reader.patient_series_index[ids] for ids in split_patients[2]])
+        if validation_idx < patients_count:
+            self.test_series = list(itertools.chain(
+                *[patient_index[pid] for pid in patients_list[validation_idx:]]
+            ))
         else:
             self.test_series = []
         
@@ -78,24 +83,19 @@ class DatasetManager:
 
         self.train_ds = NLSTDataset(
             self._reader, effective_series_list=self.train_series, train=True,
-            transform=transform_train, patient_ids=split_patients[0]
+            transform=transform_train
         )
         self.validation_ds = NLSTDataset(
             self._reader, effective_series_list=self.val_series, train=False,
-            transform=transform_validation, patient_ids=split_patients[1]
+            transform=transform_validation
         )
         if len(self.test_series) != 0:
             self.test_ds = NLSTDataset(
                 self._reader, effective_series_list=self.test_series, train=False,
-                transform=transform_test, patient_ids=split_patients[2]
+                transform=transform_test
             )
         else:
             self.test_ds = None
-
-        overlap = list(set(split_patients[0]) & set(split_patients[1]))
-        print(f"Overlap: {overlap}")
-        print(split_patients[0])
-        print(split_patients[1])
 
     @property
     def instance_shape(self):
@@ -108,9 +108,7 @@ class NLSTDataset(torch.utils.data.Dataset):
     reader: NLSTDataReader
     effective_series_list: list[SeriesID]
     train: bool
-    patient_ids: list[PatientID]
     transform: Optional[Callable] = torch.nn.Identity()
-    
 
     def __len__(self):
         return len(self.effective_series_list)
@@ -125,7 +123,8 @@ class NLSTDataset(torch.utils.data.Dataset):
         slice_tensor = slice_image.tensor
         if self.train:
             stacked_tensor = torch.stack(
-                (slice_tensor, self.transform(slice_tensor))
+                (slice_tensor.to(torch.float16), self.transform(slice_tensor).to(torch.float16))
+                # (slice_tensor, self.transform(slice_tensor))
             )
             return stacked_tensor, target
         else:
@@ -134,6 +133,3 @@ class NLSTDataset(torch.utils.data.Dataset):
 
 if __name__ == '__main__':
     manager = DatasetManager(manifest=1632928843386)
-    
-
-

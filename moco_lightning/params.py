@@ -67,7 +67,7 @@ class ModelParams:
     prediction_mlp_normalization: Optional[str] = "same"  # if same will use mlp_normalization
 
     # data loader parameters
-    num_data_workers: int = 4
+    num_data_workers: int = 2
     drop_last_batch: bool = True
     pin_data_memory: bool = True
     gather_keys_for_queue: bool = False
