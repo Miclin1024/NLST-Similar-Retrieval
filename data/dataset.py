@@ -10,7 +10,7 @@ from data.reader import NLSTDataReader
 
 
 class DatasetManager:
-    _reader: NLSTDataReader
+    reader: NLSTDataReader
     train_ds: torch.utils.data.Dataset
     validation_ds: torch.utils.data.Dataset
     test_ds: Optional[torch.utils.data.Dataset]
@@ -50,8 +50,8 @@ class DatasetManager:
         if ds_split is None:
             ds_split = [.8, .2, .0]
 
-        self._reader = NLSTDataReader(manifest, test_mode=test_mode)
-        patient_index = self._reader.patient_series_index
+        self.reader = NLSTDataReader(manifest, test_mode=test_mode)
+        patient_index = self.reader.patient_series_index
         patients_list = list(patient_index.keys())
         np.random.shuffle(patients_list)
         patients_count = len(patients_list)
@@ -82,16 +82,16 @@ class DatasetManager:
         self.transform_test = transform_test
 
         self.train_ds = NLSTDataset(
-            self._reader, effective_series_list=self.train_series, train=True,
+            self.reader, effective_series_list=self.train_series, train=True,
             transform=transform_train
         )
         self.validation_ds = NLSTDataset(
-            self._reader, effective_series_list=self.val_series, train=False,
+            self.reader, effective_series_list=self.val_series, train=False,
             transform=transform_validation
         )
         if len(self.test_series) != 0:
             self.test_ds = NLSTDataset(
-                self._reader, effective_series_list=self.test_series, train=False,
+                self.reader, effective_series_list=self.test_series, train=False,
                 transform=transform_test
             )
         else:

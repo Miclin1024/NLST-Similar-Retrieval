@@ -27,10 +27,8 @@ class SamePatientEvaluator:
     reader: NLSTDataReader
 
     @staticmethod
-    def create_log_file(model_name: str, version: int, epoch: int) -> TextIO:
+    def clear_log_folder(model_name: str, version: int):
         log_file_dir = os.path.join(LOG_DIR, "same_patient", f"{model_name}_v{version}")
-        os.makedirs(log_file_dir, exist_ok=True)
-
         # Delete everything in the folder
         for file in os.listdir(log_file_dir):
             path = os.path.join(log_file_dir, file)
@@ -41,6 +39,11 @@ class SamePatientEvaluator:
                     shutil.rmtree(path)
             except Exception as e:
                 print(e)
+
+    @staticmethod
+    def create_log_file(model_name: str, version: int, epoch: int) -> TextIO:
+        log_file_dir = os.path.join(LOG_DIR, "same_patient", f"{model_name}_v{version}")
+        os.makedirs(log_file_dir, exist_ok=True)
 
         log_file_path = os.path.join(log_file_dir, f"{epoch}.csv")
         file = open(log_file_path, "w")

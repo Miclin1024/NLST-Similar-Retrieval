@@ -9,6 +9,7 @@ from functools import partial
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from moco_lightning.utils import *
+from moco_lightning.lars import LARS
 from torch.utils.data import DataLoader
 from moco_lightning.params import ModelParams
 from sklearn.linear_model import LogisticRegression
@@ -40,10 +41,7 @@ class LitMoCo(pl.LightningModule):
         self.test_mode = test_mode
 
         # Check for configuration issues
-        if (
-                hparams.gather_keys_for_queue
-                and not hparams.shuffle_batch_norm
-        ):
+        if hparams.gather_keys_for_queue and not hparams.shuffle_batch_norm:
             warnings.warn(
                 "Configuration suspicious: gather_keys_for_queue without shuffle_batch_norm or weight standardization"
             )
@@ -56,19 +54,19 @@ class LitMoCo(pl.LightningModule):
 
         self.manager = DatasetManager(
             int(os.environ.get("MANIFEST_ID")),
-            ds_split=[.7, .05, .25], test_mode=self.test_mode
+            ds_split=[.7, .15, .15], test_mode=self.test_mode
         )
         
-        self.evaluator = SamePatientEvaluator(
-            self.model, self.manager._reader)
+        self.evaluator = SamePatientEvaluator(self.model, self.manager.reader)
+        self.evaluator.clear_log_folder("r3d_18", 0)
 
-        # if hparams.use_lagging_model:
-        #     # "key" function (no grad)
-        #     self.lagging_model = copy.deepcopy(self.model)
-        #     for param in self.lagging_model.parameters():
-        #         param.requires_grad = False
-        # else:
-        #     self.lagging_model = None
+        if hparams.use_lagging_model:
+            # "key" function (no grad)
+            self.lagging_model = copy.deepcopy(self.model)
+            for param in self.lagging_model.parameters():
+                param.requires_grad = False
+        else:
+            self.lagging_model = None
 
         self.projection_model = MLP(
             hparams.embedding_dim,
@@ -93,19 +91,6 @@ class LitMoCo(pl.LightningModule):
                 param.requires_grad = False
         else:
             self.lagging_projection_model = None
-
-        if hparams.use_lagging_model:
-            #  "key" function (no grad)
-            self.lagging_projection_model = copy.deepcopy(self.projection_model)
-            for param in self.lagging_projection_model.parameters():
-                param.requires_grad = False
-        else:
-            self.lagging_projection_model = None
-
-        # this classifier is used to compute representation quality each epoch
-        # TODO: maybe add a regression model to identify Patient Weight
-        # TODO: use logistic regression to identify Emphysema
-        self.sklearn_classifier = LogisticRegression(max_iter=100, solver="liblinear")
 
         if hparams.use_negative_examples_from_queue:
             # create the queue
@@ -132,21 +117,19 @@ class LitMoCo(pl.LightningModule):
 
         # compute query features
         emb_q = self.model(im_q)
-        emb_q = emb_q.view(self.hparams.batch_size, self.hparams.embedding_dim)
         q_projection = self.projection_model(emb_q)
         q = self.prediction_model(q_projection)  # queries: NxC
 
         if self.hparams.use_lagging_model:
             # compute key features
             with torch.no_grad():  # no gradient to keys
-                # if self.hparams.shuffle_batch_norm:
-                #     im_k, idx_unshuffle = utils.BatchShuffleDDP.shuffle(im_k)
+                if self.hparams.shuffle_batch_norm:
+                    im_k, idx_unshuffle = BatchShuffleDDP.shuffle(im_k)
                 k = self.lagging_projection_model(self.lagging_model(im_k))  # keys: NxC
-                # if self.hparams.shuffle_batch_norm:
-                #     k = utils.BatchShuffleDDP.unshuffle(k, idx_unshuffle)
+                if self.hparams.shuffle_batch_norm:
+                    k = BatchShuffleDDP.unshuffle(k, idx_unshuffle)
         else:
             emb_k = self.model(im_k)
-            emb_k = emb_k.view(self.hparams.batch_size, self.hparams.embedding_dim)
             k_projection = self.projection_model(emb_k)
             k = self.prediction_model(k_projection)  # queries: NxC
 
@@ -341,7 +324,7 @@ class LitMoCo(pl.LightningModule):
         # }
         # print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
         # self.log_dict(log_data, sync_dist=True)
-        log_file = self.evaluator.create_log_file("resnet_34_moco", 0, self.current_epoch)
+        log_file = self.evaluator.create_log_file("r3d_18", 0, self.current_epoch)
         acc = self.evaluator.score(self.manager.validation_ds.effective_series_list, log_file)
         self.log("similar_scan_acc", acc)
         log_file.close()
@@ -373,6 +356,8 @@ class LitMoCo(pl.LightningModule):
         ]
         if self.hparams.optimizer_name == "sgd":
             optimizer = torch.optim.SGD
+        elif self.hparams.optimizer_name == "lars":
+            optimizer = partial(LARS, warmup_epochs=self.hparams.lars_warmup_epochs, eta=self.hparams.lars_eta)
         else:
             raise NotImplementedError(f"No such optimizer {self.hparams.optimizer_name}")
 

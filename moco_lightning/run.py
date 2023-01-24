@@ -20,39 +20,22 @@ if __name__ == '__main__':
     mlp_output_dim = int(mlp_embedding_dim)
     mlp_hidden_dim = int(mlp_embedding_dim)
 
-    if torch.has_mps:
-        base_config = ModelParams(
-            encoder=encoder,
-            embedding_dim=mlp_embedding_dim,
-            dim=mlp_output_dim,
-            mlp_hidden_dim=mlp_hidden_dim,
-            lr=0.08,
-            batch_size=batch_size,
-            gather_keys_for_queue=False,
-            loss_type="ip",
-            use_both_augmentations_as_queries=True,
-            mlp_normalization="bn",
-            prediction_mlp_layers=2,
-            projection_mlp_layers=2,
-            m=0.996,
-        )
-    else:
-        base_config = ModelParams(
-            encoder=encoder,
-            embedding_dim=mlp_embedding_dim,
-            dim=mlp_output_dim,
-            mlp_hidden_dim=mlp_hidden_dim,
-            lr=0.001,
-            batch_size=batch_size,
-            gather_keys_for_queue=False,
-            loss_type="ip",
-            use_both_augmentations_as_queries=True,
-            use_negative_examples_from_queue=True,
-            mlp_normalization="bn",
-            prediction_mlp_layers=2,
-            projection_mlp_layers=2,
-            m=0.996,
-        )
+    base_config = ModelParams(
+        encoder=encoder,
+        embedding_dim=mlp_embedding_dim,
+        dim=mlp_output_dim,
+        mlp_hidden_dim=mlp_hidden_dim,
+        lr=0.001,
+        batch_size=batch_size,
+        gather_keys_for_queue=True,
+        loss_type="ip",
+        use_both_augmentations_as_queries=True,
+        use_negative_examples_from_queue=False,
+        mlp_normalization="bn",
+        prediction_mlp_layers=2,
+        projection_mlp_layers=2,
+        m=0.998,
+    )
 
     method = LitMoCo(base_config)
     logger = TensorBoardLogger("logs/tensor_board", name="base")
