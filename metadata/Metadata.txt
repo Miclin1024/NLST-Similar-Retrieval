@@ -1,0 +1,47 @@
+There are 53,452 patients, most are long-time smokers. 
+There are around 10,000 more males than females present. 
+There's a data dictionary which divides the metadata into several categories.
+The categories are as follows:
+['Alcohol', 'Cancer history', 'Cancers of Any Site', 'Death',
+       'Demographic', 'Disease history', 'Follow-Up/Procedures',
+       'Lung cancer', 'Progression', 'Screening', 'Smoking', 'Study',
+       'Work history']
+
+
+Columns we might want to look at:
+
+    1. Demographic: describe martial status, age, weight, gender, and height. 
+    These are useful for identifying if the model recognizes broad physical attributes 
+    of the scans.
+
+    2. Disease history: columns starting with diag are useful. 
+    These indicate diagnoses occur prior to trial such as heart disease,
+    emphysema, etc. The presence of diagnoses is certainly not the majority, 
+    but it is much more common than diagnoses of cancer. 
+    The most common diagnoses are hypertension, pneumonia, heart diseases, and diabetes.
+
+    3. Smoking: these indicate how many years you've smoked, when you've quited, 
+    whether you live with or work with a smoker, etc. It'd be interesting to see if 
+    the scans can identify how the lungs differ depending on exposure to smoking.
+
+    4. work history: indicators whether the patient works in specific profession 
+    that have usually have exposure to smoke; columns starting with wrk can be useful.
+    Again, more often than not the patients do not belong to the professions listed here.
+    There are some common professions such as farmers, painters, or chemical/plastic 
+    manufacturing employees.
+
+
+Irrelevant data categories:
+
+    1. study: relates to data collection process, not relevant
+    2. screening: no columns present in our data
+    3. death: records death of patients, not relevant
+    4. alcohol: not very useful due to lots of missing data (2/3 or 1/3 missing)
+    5. progression: these describe status of any existing lung cancer conditions, but have too many missing data (> 2/3)
+
+At first glance, not very useful:
+
+    1. Cancer history: columns starting with canc are useful. These indicate whether a specific type of cancer has been diagnosed before participating in the trial. Many don't have diagnoses of cancers.
+    follow-up/procedures: many columns have many NaN values, not very useful at the moment
+    Cancers of any site: this is just one column indicating whether the patient has any type of cancer at all.
+    2. Lung cancer: these columns indicate whether the patient's family (parents, child, siblings) have lung cancer. Potentially useful later.
