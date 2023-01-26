@@ -7,12 +7,10 @@ import torch.nn as nn
 class ModelParams:
     # encoder model selection
     encoder: nn.Module
-    # TODO: Implement shuffle batch in the future
-    shuffle_batch_norm: bool = False
+    shuffle_batch_norm: bool = True
     embedding_dim: int = 512  # must match embedding dim of encoder
 
     # data-related parameters
-    dataset_name: str = "stl10"
     batch_size: int = 256
 
     # MoCo parameters
@@ -50,8 +48,7 @@ class ModelParams:
 
     # Change these to make more like VICReg
     use_vicreg_loss: bool = False
-    # TODO: Maybe turn it back on in the future
-    use_lagging_model: bool = False
+    use_lagging_model: bool = True
     use_unit_sphere_projection: bool = True
     invariance_loss_weight: float = 25.0
     variance_loss_weight: float = 25.0

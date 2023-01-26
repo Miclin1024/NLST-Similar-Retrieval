@@ -14,7 +14,7 @@ from sklearn.metrics import roc_auc_score
 
 EVAL_BATCH_SIZE = 12
 SIMILAR_LOG_TOP_SCAN_RETRIEVAL_SIZE = 5
-SIMILAR_LOG_SAMPLE_SIZE = 5
+SIMILAR_LOG_SAMPLE_SIZE = 300
 
 _LOG_DF_COLUMN_NAMES = ["PID", "SID", "CORRECT"]
 for i in range(SIMILAR_LOG_TOP_SCAN_RETRIEVAL_SIZE):
@@ -29,6 +29,8 @@ class SamePatientEvaluator:
     @staticmethod
     def clear_log_folder(model_name: str, version: int):
         log_file_dir = os.path.join(LOG_DIR, "same_patient", f"{model_name}_v{version}")
+        if not os.path.exists(log_file_dir):
+            return
         # Delete everything in the folder
         for file in os.listdir(log_file_dir):
             path = os.path.join(log_file_dir, file)
@@ -88,7 +90,11 @@ class SamePatientEvaluator:
         auc_scores, correct_count = [], 0
         if log_file is not None:
             log_result_df = pd.DataFrame(columns=_LOG_DF_COLUMN_NAMES)
-            log_result_sample_index_set = np.random.choice(np.arange(0, n), size=SIMILAR_LOG_SAMPLE_SIZE, replace=False)
+            log_result_sample_index_set = np.random.choice(
+                np.arange(0, n),
+                size=min(SIMILAR_LOG_SAMPLE_SIZE, n),
+                replace=False
+            )
             log_result_sample_index_set = set(log_result_sample_index_set)
         else:
             log_result_df = None

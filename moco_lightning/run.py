@@ -30,11 +30,13 @@ if __name__ == '__main__':
         gather_keys_for_queue=True,
         loss_type="ip",
         use_both_augmentations_as_queries=True,
-        use_negative_examples_from_queue=False,
+        use_negative_examples_from_queue=True,
+        use_negative_examples_from_batch=False,
         mlp_normalization="bn",
         prediction_mlp_layers=2,
         projection_mlp_layers=2,
-        m=0.998,
+        m=0.997,
+        K=128,
     )
 
     method = LitMoCo(base_config)
