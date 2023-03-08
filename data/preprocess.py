@@ -5,7 +5,8 @@ from . import NLSTDataReader
 if __name__ == '__main__':
     dotenv.load_dotenv()
     reader = NLSTDataReader(
-        manifest=int(os.environ.get("MANIFEST_ID")),
-        test_mode=False
+        manifests=[1632928843386, 1632927888500, 1632929488567, 1632930131404],
+        # manifests=[1632928843386, 1632927888500, 1632929488567, 1632930131404, 1632933130941],
+        default_access_mode="direct",
     )
     reader.perform_preprocessing()

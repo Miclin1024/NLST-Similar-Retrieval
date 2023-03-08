@@ -6,12 +6,14 @@ import torch.nn as nn
 @attrs.define(auto_attribs=True, slots=True)
 class ModelParams:
     # encoder model selection
+    encoder_name: str
     encoder: nn.Module
-    shuffle_batch_norm: bool = True
+    shuffle_batch_norm: bool = False
     embedding_dim: int = 512  # must match embedding dim of encoder
 
     # data-related parameters
-    batch_size: int = 256
+    batch_size: int = 8
+    eval_batch_size: Optional[int] = None
 
     # MoCo parameters
     K: int = 65536  # number of examples in queue
@@ -64,7 +66,7 @@ class ModelParams:
     prediction_mlp_normalization: Optional[str] = "same"  # if same will use mlp_normalization
 
     # data loader parameters
-    num_data_workers: int = 2
+    num_data_workers: int = 8
     drop_last_batch: bool = True
     pin_data_memory: bool = True
     gather_keys_for_queue: bool = False

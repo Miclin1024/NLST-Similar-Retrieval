@@ -5,8 +5,8 @@ from evaluations import SamePatientEvaluator
 
 print(f"---------------------------------------------")
 reader = NLSTDataReader(
-    manifest=int(os.environ.get("MANIFEST_ID")), 
-    test_mode=True
+    manifests=[1632928843386],
+    head=30
 )
 print(f"Running baseline analysis (n={len(reader.patient_series_index)})")
 
@@ -20,22 +20,6 @@ encoders = [
 for encoder in encoders:
     print(f"---------------------------------------------")
     print(f"Begin evaluating model: {encoder.description}")
-    evaluator = SamePatientEvaluator(encoder=encoder, reader=reader)
-    log_file = SamePatientEvaluator.create_log_file(encoder.name, 0, 0)
-    evaluator.score(reader.series_list, log_file)
-    log_file.close()
-    
-print(f"---------------------------------------------")
-reader = NLSTDataReader(
-    manifest=int(os.environ.get("MANIFEST_ID")), 
-    test_mode=False
-)
-print(f"Running baseline analysis (n={len(reader.patient_series_index)})")
-
-for encoder in encoders:
-    print(f"---------------------------------------------")
-    print(f"Begin evaluating model: {encoder.description}")
-    evaluator = SamePatientEvaluator(encoder=encoder, reader=reader)
-    log_file = SamePatientEvaluator.create_log_file(encoder.name, 1, 0)
-    evaluator.score(reader.series_list, log_file)
-    log_file.close()
+    evaluator = SamePatientEvaluator(experiment_name=f"baseline-{encoder.name}", encoder=encoder,
+                                     reader=reader, batch_size=8)
+    evaluator.score(reader.series_list)

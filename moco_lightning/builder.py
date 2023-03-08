@@ -1,22 +1,29 @@
+import os
 import copy
 import torch
 import warnings
+
+import torchvision.models.video
+
 from data import *
-from ray import tune
+from definitions import *
 from evaluations import *
+import torch.nn.functional
 from typing import Optional
 from functools import partial
 import pytorch_lightning as pl
-import torch.nn.functional as F
 from moco_lightning.utils import *
 from moco_lightning.lars import LARS
 from torch.utils.data import DataLoader
 from moco_lightning.params import ModelParams
-from sklearn.linear_model import LogisticRegression
 from pytorch_lightning.utilities import AttributeDict
 
 
+MODEL_SAVE_PATH = os.path.join(LOG_DIR, "models")
+
+
 class LitMoCo(pl.LightningModule):
+    experiment_name: str
     model: torch.nn.Module
     manager: DatasetManager
     hparams: AttributeDict
@@ -25,8 +32,10 @@ class LitMoCo(pl.LightningModule):
     evaluator: SamePatientEvaluator
     lr_scheduler: Any
 
-    def __init__(self, hparams: Union[ModelParams, dict, None] = None, test_mode: bool = False, **kwargs):
+    def __init__(self, experiment_name: str, hparams: Union[ModelParams, dict, None] = None, **kwargs):
         super(LitMoCo, self).__init__()
+
+        self.experiment_name = experiment_name
 
         if hparams is None:
             hparams = ModelParams(**kwargs)
@@ -37,8 +46,6 @@ class LitMoCo(pl.LightningModule):
             self.hparams.update(AttributeDict(attrs.asdict(hparams)))
         else:
             self.hparams = AttributeDict(attrs.asdict(hparams))
-        
-        self.test_mode = test_mode
 
         # Check for configuration issues
         if hparams.gather_keys_for_queue and not hparams.shuffle_batch_norm:
@@ -51,23 +58,30 @@ class LitMoCo(pl.LightningModule):
             warnings.warn("Configuration suspicious: cross entropy loss without negative examples")
 
         self.model = hparams.encoder
-
+        #
         self.manager = DatasetManager(
-            int(os.environ.get("MANIFEST_ID")),
-            ds_split=[.7, .15, .15], test_mode=self.test_mode
+            list(map(lambda elem: int(elem), os.environ.get("MANIFEST_ID").split(","))),
+            ds_split=[.8, .2, 0], default_access_mode="cached"
         )
-        
-        self.evaluator = SamePatientEvaluator(self.model, self.manager.reader)
-        self.evaluator.clear_log_folder("r3d_18", 0)
+        # self.manager = DatasetManager(
+        #     manifests=[1632928843386],
+        #     ds_split=[.8, .2, 0],
+        #     default_access_mode="cached"
+        # )
+
+        self.evaluator = SamePatientEvaluator(experiment_name, self, self.manager.reader,
+                                              batch_size=hparams.eval_batch_size or hparams.batch_size)
 
         if hparams.use_lagging_model:
             # "key" function (no grad)
+            print(f"Creating momentum key encoder...")
             self.lagging_model = copy.deepcopy(self.model)
             for param in self.lagging_model.parameters():
                 param.requires_grad = False
         else:
             self.lagging_model = None
 
+        print(f"Building projection MLP layer...")
         self.projection_model = MLP(
             hparams.embedding_dim,
             hparams.dim,
@@ -76,6 +90,7 @@ class LitMoCo(pl.LightningModule):
             normalization=MLP.get_normalization(hparams),
         )
 
+        print(f"Building prediction MLP layer...")
         self.prediction_model = MLP(
             hparams.dim,
             hparams.dim,
@@ -86,12 +101,14 @@ class LitMoCo(pl.LightningModule):
 
         if hparams.use_lagging_model:
             #  "key" function (no grad)
+            print(f"Creating momentum projection layer...")
             self.lagging_projection_model = copy.deepcopy(self.projection_model)
             for param in self.lagging_projection_model.parameters():
                 param.requires_grad = False
         else:
             self.lagging_projection_model = None
 
+        print("Registering buffer...")
         if hparams.use_negative_examples_from_queue:
             # create the queue
             self.register_buffer("queue", torch.randn(hparams.dim, hparams.K))
@@ -99,6 +116,10 @@ class LitMoCo(pl.LightningModule):
             self.register_buffer("queue_ptr", torch.zeros(1, dtype=torch.long))
         else:
             self.queue = None
+
+        print(f"Saving hyperparameters...")
+        self.save_hyperparameters(attrs.asdict(hparams), ignore="encoder")
+        print(f"Builder initialization complete")
 
     def _get_embeddings(self, x):
         """
@@ -184,14 +205,15 @@ class LitMoCo(pl.LightningModule):
                     raise Exception("Must have negative examples for ce loss")
 
                 predictions = log_softmax_with_factors(logits / self.hparams.T, neg_factor=neg_factor)
-                return F.nll_loss(predictions, labels)
+                return torch.nn.functional.nll_loss(predictions, labels)
        
-            return F.cross_entropy(logits / self.hparams.T, labels)
+            return torch.nn.functional.cross_entropy(logits / self.hparams.T, labels)
 
         new_labels = torch.zeros_like(logits)
         new_labels.scatter_(1, labels.unsqueeze(1), 1)
         if self.hparams.loss_type == "bce":
-            return F.binary_cross_entropy_with_logits(logits / self.hparams.T, new_labels) * logits.shape[1]
+            return torch.nn.functional.binary_cross_entropy_with_logits(
+                logits / self.hparams.T, new_labels) * logits.shape[1]
 
         if self.hparams.loss_type == "ip":
             # inner product
@@ -205,13 +227,13 @@ class LitMoCo(pl.LightningModule):
         assert z_a.shape == z_b.shape and len(z_a.shape) == 2
 
         # invariance loss
-        loss_inv = F.mse_loss(z_a, z_b)
+        loss_inv = torch.nn.functional.mse_loss(z_a, z_b)
 
         # variance loss
         std_z_a = torch.sqrt(z_a.var(dim=0) + self.hparams.variance_loss_epsilon)
         std_z_b = torch.sqrt(z_b.var(dim=0) + self.hparams.variance_loss_epsilon)
-        loss_v_a = torch.mean(F.relu(1 - std_z_a))
-        loss_v_b = torch.mean(F.relu(1 - std_z_b))
+        loss_v_a = torch.mean(torch.nn.functional.relu(1 - std_z_a))
+        loss_v_b = torch.mean(torch.nn.functional.relu(1 - std_z_b))
         loss_var = loss_v_a + loss_v_b
 
         # covariance loss
@@ -269,21 +291,14 @@ class LitMoCo(pl.LightningModule):
         contrastive_loss = contrastive_loss.mean() * self.hparams.loss_constant_factor
 
         log_data = {
-            "step_train_loss": contrastive_loss.item(),
-            "step_pos_cos": pos_ip.item(),
-            "step_neg_cos": neg_ip.item(),
+            "train/step_train_loss": contrastive_loss.item(),
+            "train/step_pos_cos": pos_ip.item(),
+            "train/step_neg_cos": neg_ip.item(),
             **losses,
         }
 
         with torch.no_grad():
             self._momentum_update_key_encoder()
-
-        some_negative_examples = (
-                self.hparams.use_negative_examples_from_batch or self.hparams.use_negative_examples_from_queue
-        )
-        if some_negative_examples:
-            acc1, acc5 = calculate_accuracy(logits, labels, topk=(1, 5))
-            log_data.update({"step_train_acc1": acc1, "step_train_acc5": acc5})
 
         # dequeue and enqueue
         if self.hparams.use_negative_examples_from_queue:
@@ -302,35 +317,32 @@ class LitMoCo(pl.LightningModule):
         # return {"emb": emb, "labels": class_labels["bmi_category"], "series_id": class_labels["series_id"]}
 
     def validation_epoch_end(self, outputs):
-        # embeddings = torch.cat([x["emb"] for x in outputs]).cpu().detach().numpy()
-        # labels = torch.cat([x["labels"] for x in outputs]).cpu().detach().numpy()
-        # num_split_linear = embeddings.shape[0] // 2
-        # self.sklearn_classifier.fit(embeddings[:num_split_linear], labels[:num_split_linear])
-        # train_accuracy = self.sklearn_classifier.score(
-        #     embeddings[:num_split_linear],
-        #     labels[:num_split_linear]
-        # ) * 100
-        # valid_accuracy = self.sklearn_classifier.score(
-        #     embeddings[num_split_linear:],
-        #     labels[num_split_linear:]
-        # ) * 100
+        top_1_accuracy, top_5_accuracy, average_auc = self.evaluator.score(
+            self.manager.validation_ds.effective_series_list)
+        self.log_dict({
+            "val/sp_top1_accuracy": top_1_accuracy,
+            "val/sp_top5_accuracy": top_5_accuracy,
+            "val/same_patient_auc": average_auc,
+        })
 
-        # log_data = {
-        #     "epoch": float(self.current_epoch),
-        #     "train_class_acc": train_accuracy,
-        #     "valid_class_acc": valid_accuracy,
-        #     "T": self._get_temp(),
-        #     "m": self._get_m(),
-        # }
-        # print(f"\nEpoch {self.current_epoch} accuracy: train: {train_accuracy:.1f}%, validation: {valid_accuracy:.1f}%")
-        # self.log_dict(log_data, sync_dist=True)
-        log_file = self.evaluator.create_log_file("r3d_18", 0, self.current_epoch)
-        acc = self.evaluator.score(self.manager.validation_ds.effective_series_list, log_file)
-        self.log("similar_scan_acc", acc)
-        log_file.close()
+        self._create_model_checkpoint()
+
+    def _create_model_checkpoint(self):
+        experiment_folder = os.path.join(MODEL_SAVE_PATH, self.experiment_name)
+        os.makedirs(experiment_folder, exist_ok=True)
+        model_path = os.path.join(experiment_folder, f"epoch{self.current_epoch}.pt")
+
+        torch.save({
+            "epoch": self.current_epoch,
+            "model_state_dict": self.model.state_dict(),
+            "projection_model_state_dict": self.projection_model.state_dict(),
+            "prediction_model_state_dict": self.prediction_model.state_dict(),
+        }, model_path)
+        print(f"Checkpoint saved to {model_path}")
 
     def configure_optimizers(self):
         # exclude bias and batch norm from LARS and weight decay
+        print("Configuring optimizers...")
         regular_parameters = []
         regular_parameter_names = []
         excluded_parameters = []
@@ -355,16 +367,17 @@ class LitMoCo(pl.LightningModule):
             },
         ]
         if self.hparams.optimizer_name == "sgd":
-            optimizer = torch.optim.SGD
+            optimizer = partial(torch.optim.SGD, momentum=self.hparams.momentum)
         elif self.hparams.optimizer_name == "lars":
-            optimizer = partial(LARS, warmup_epochs=self.hparams.lars_warmup_epochs, eta=self.hparams.lars_eta)
+            optimizer = partial(LARS, momentum=self.hparams.momentum, warmup_epochs=self.hparams.lars_warmup_epochs, eta=self.hparams.lars_eta)
+        elif self.hparams.optimizer_name == "adam":
+            optimizer = partial(torch.optim.Adam, betas=(0.9, 0.999))
         else:
             raise NotImplementedError(f"No such optimizer {self.hparams.optimizer_name}")
 
         encoding_optimizer = optimizer(
             param_groups,
             lr=self.hparams.lr,
-            momentum=self.hparams.momentum,
             weight_decay=self.hparams.weight_decay,
         )
 
@@ -373,6 +386,7 @@ class LitMoCo(pl.LightningModule):
             self.hparams.max_epochs,
             eta_min=self.hparams.final_lr_schedule_value,
         )
+        print(f"Done. Optimizer is {self.hparams.optimizer_name}")
         return [encoding_optimizer], [self.lr_scheduler]
 
     def _get_m(self):
@@ -414,7 +428,7 @@ class LitMoCo(pl.LightningModule):
         self.queue_ptr[0] = ptr
 
     def train_dataloader(self):
-        return DataLoader(
+        loader = DataLoader(
             self.manager.train_ds,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_data_workers,
@@ -423,9 +437,13 @@ class LitMoCo(pl.LightningModule):
             shuffle=True,
             persistent_workers=True,
         )
+        size = len(self.manager.train_series)
+        print(f"Train data loader with size = {size} initialized")
+        self.save_hyperparameters({"train_size": size})
+        return loader
 
     def val_dataloader(self):
-        return DataLoader(
+        loader = DataLoader(
             self.manager.validation_ds,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_data_workers,
@@ -433,6 +451,10 @@ class LitMoCo(pl.LightningModule):
             drop_last=self.hparams.drop_last_batch,
             persistent_workers=True,
         )
+        size = len(self.manager.val_series)
+        print(f"Validation data loader with size = {size} initialized")
+        self.save_hyperparameters({"validation_size": size})
+        return loader
 
 
 class MLP(torch.nn.Module):

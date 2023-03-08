@@ -9,6 +9,26 @@ from typing import Optional, Callable
 from data.reader import NLSTDataReader
 
 
+def default_moco_transform() -> Callable:
+    transforms = [
+        tio.RandomFlip(),
+        tio.RandomBiasField(),
+        tio.RandomElasticDeformation(max_displacement=5),
+        # tio.RandomAffine(
+        #     scales=(1.0, 1.0),
+        #     degrees=45,
+        #     translation=0,
+        #     isotropic=True,
+        #     center="image",
+        # ),
+        tio.RandomNoise(std=(0, 0.1)),
+        # tio.RandomBlur(),
+
+        tio.ZNormalization(),
+    ]
+    return tio.Compose(transforms)
+
+
 class DatasetManager:
     reader: NLSTDataReader
     train_ds: torch.utils.data.Dataset
@@ -20,37 +40,17 @@ class DatasetManager:
     train_series: list[SeriesID]
     val_series: list[SeriesID]
     test_series: list[SeriesID]
-    # if True, cut short the metadata list to 100 scans to speed up training and testing of code
-    test_mode: bool = False
 
-    @staticmethod
-    def default_moco_transform() -> Callable:
-        transforms = [
-            # tio.RandomElasticDeformation(
-            #     num_control_points=8, locked_borders=2),
-            tio.RandomAffine(
-                scales=(0.9, 1.1),
-                degrees=15,
-                translation=0,
-                isotropic=True,
-                center="image",
-            ),
-            tio.RandomNoise(),
-            tio.RandomBlur(),
-            tio.ZNormalization(),
-        ]
-        return tio.Compose(transforms)
-
-    def __init__(self, manifest: int, ds_split=None,
+    def __init__(self, manifests: [int], ds_split=None,
                  transform_train: Callable = default_moco_transform(),
                  transform_validation: Callable = default_moco_transform(),
                  transform_test: Callable = default_moco_transform(),
-                 test_mode: bool = False):
+                 default_access_mode: str = "cached"):
 
         if ds_split is None:
             ds_split = [.8, .2, .0]
 
-        self.reader = NLSTDataReader(manifest, test_mode=test_mode)
+        self.reader = NLSTDataReader(manifests, default_access_mode=default_access_mode)
         patient_index = self.reader.patient_series_index
         patients_list = list(patient_index.keys())
         np.random.shuffle(patients_list)
@@ -123,7 +123,7 @@ class NLSTDataset(torch.utils.data.Dataset):
         slice_tensor = slice_image.tensor
         if self.train:
             stacked_tensor = torch.stack(
-                (slice_tensor.to(torch.float16), self.transform(slice_tensor).to(torch.float16))
+                (self.transform(slice_tensor).to(torch.float16), self.transform(slice_tensor).to(torch.float16))
                 # (slice_tensor, self.transform(slice_tensor))
             )
             return stacked_tensor, target
@@ -132,4 +132,4 @@ class NLSTDataset(torch.utils.data.Dataset):
 
 
 if __name__ == '__main__':
-    manager = DatasetManager(manifest=1632928843386)
+    manager = DatasetManager(manifests=[1632928843386])
