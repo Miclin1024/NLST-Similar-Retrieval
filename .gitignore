@@ -187,3 +187,4 @@ data/*/*
 .DS_Store
 tb_logs/
 logs/
+metadata/
