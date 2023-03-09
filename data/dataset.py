@@ -121,14 +121,11 @@ class NLSTDataset(torch.utils.data.Dataset):
         # x = channel, depth, width, height
         slice_image, target = self.reader.read_series(q_series_id)
         slice_tensor = slice_image.tensor
-        if self.train:
-            stacked_tensor = torch.stack(
-                (self.transform(slice_tensor).to(torch.float16), self.transform(slice_tensor).to(torch.float16))
-                # (slice_tensor, self.transform(slice_tensor))
-            )
-            return stacked_tensor, target
-        else:
-            return slice_tensor, target
+        stacked_tensor = torch.stack(
+            (self.transform(slice_tensor).to(torch.float16), self.transform(slice_tensor).to(torch.float16))
+            # (slice_tensor, self.transform(slice_tensor))
+        )
+        return stacked_tensor, target
 
 
 if __name__ == '__main__':

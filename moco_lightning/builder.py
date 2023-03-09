@@ -61,7 +61,7 @@ class LitMoCo(pl.LightningModule):
         #
         self.manager = DatasetManager(
             list(map(lambda elem: int(elem), os.environ.get("MANIFEST_ID").split(","))),
-            ds_split=[.8, .2, 0], default_access_mode="cached"
+            ds_split=[.9, .1, 0], default_access_mode="cached"
         )
         # self.manager = DatasetManager(
         #     manifests=[1632928843386],
@@ -223,70 +223,27 @@ class LitMoCo(pl.LightningModule):
 
         raise NotImplementedError(f"Loss function {self.hparams.loss_type} not implemented")
 
-    def _get_vicreg_loss(self, z_a, z_b, batch_idx):
-        assert z_a.shape == z_b.shape and len(z_a.shape) == 2
-
-        # invariance loss
-        loss_inv = torch.nn.functional.mse_loss(z_a, z_b)
-
-        # variance loss
-        std_z_a = torch.sqrt(z_a.var(dim=0) + self.hparams.variance_loss_epsilon)
-        std_z_b = torch.sqrt(z_b.var(dim=0) + self.hparams.variance_loss_epsilon)
-        loss_v_a = torch.mean(torch.nn.functional.relu(1 - std_z_a))
-        loss_v_b = torch.mean(torch.nn.functional.relu(1 - std_z_b))
-        loss_var = loss_v_a + loss_v_b
-
-        # covariance loss
-        N, D = z_a.shape
-        z_a = z_a - z_a.mean(dim=0)
-        z_b = z_b - z_b.mean(dim=0)
-        cov_z_a = ((z_a.T @ z_a) / (N - 1)).square()  # DxD
-        cov_z_b = ((z_b.T @ z_b) / (N - 1)).square()  # DxD
-        loss_c_a = (cov_z_a.sum() - cov_z_a.diagonal().sum()) / D
-        loss_c_b = (cov_z_b.sum() - cov_z_b.diagonal().sum()) / D
-        loss_cov = loss_c_a + loss_c_b
-
-        weighted_inv = loss_inv * self.hparams.invariance_loss_weight
-        weighted_var = loss_var * self.hparams.variance_loss_weight
-        weighted_cov = loss_cov * self.hparams.covariance_loss_weight
-
-        loss = weighted_inv + weighted_var + weighted_cov
-
-        return {
-            "loss": loss,
-            "loss_invariance": weighted_inv,
-            "loss_variance": weighted_var,
-            "loss_covariance": weighted_cov,
-        }
-
     def forward(self, x) -> Any:
         return self.model(x)
 
     def training_step(self, batch, batch_idx, optimizer_idx=None):
-        all_params = list(self.model.parameters())
         x, _ = batch  # batch is a tuple, we just want the image
 
         emb_q, q, k = self._get_embeddings(x)
         pos_ip, neg_ip = self._get_pos_neg_ip(emb_q, k)
-
         logits, labels = self._get_contrastive_predictions(q, k)
-       
-        if self.hparams.use_vicreg_loss:
-            losses = self._get_vicreg_loss(q, k, batch_idx)
-            contrastive_loss = losses["loss"]
-        else:
-            losses = {}
-            contrastive_loss = self._get_contrastive_loss(logits, labels)
 
-            if self.hparams.use_both_augmentations_as_queries:
-                x_flip = torch.flip(x, dims=[1])
-                emb_q2, q2, k2 = self._get_embeddings(x_flip)
-                logits2, labels2 = self._get_contrastive_predictions(q2, k2)
+        contrastive_loss = self._get_contrastive_loss(logits, labels)
 
-                pos_ip2, neg_ip2 = self._get_pos_neg_ip(emb_q2, k2)
-                pos_ip = (pos_ip + pos_ip2) / 2
-                neg_ip = (neg_ip + neg_ip2) / 2
-                contrastive_loss += self._get_contrastive_loss(logits2, labels2)
+        if self.hparams.use_both_augmentations_as_queries:
+            x_flip = torch.flip(x, dims=[1])
+            emb_q2, q2, k2 = self._get_embeddings(x_flip)
+            logits2, labels2 = self._get_contrastive_predictions(q2, k2)
+
+            pos_ip2, neg_ip2 = self._get_pos_neg_ip(emb_q2, k2)
+            pos_ip = (pos_ip + pos_ip2) / 2
+            neg_ip = (neg_ip + neg_ip2) / 2
+            contrastive_loss += self._get_contrastive_loss(logits2, labels2)
 
         contrastive_loss = contrastive_loss.mean() * self.hparams.loss_constant_factor
 
@@ -294,7 +251,6 @@ class LitMoCo(pl.LightningModule):
             "train/step_train_loss": contrastive_loss.item(),
             "train/step_pos_cos": pos_ip.item(),
             "train/step_neg_cos": neg_ip.item(),
-            **losses,
         }
 
         with torch.no_grad():
@@ -308,21 +264,32 @@ class LitMoCo(pl.LightningModule):
         return {"loss": contrastive_loss}
 
     def validation_step(self, batch, batch_idx):
-        pass
-        # x, class_labels = batch
-        # with torch.no_grad():
-        #     emb = self.model(x)
-        #     emb = emb.view(self.hparams.batch_size, self.hparams.embedding_dim)
+        x, _ = batch  # batch is a tuple, we just want the image
 
-        # return {"emb": emb, "labels": class_labels["bmi_category"], "series_id": class_labels["series_id"]}
+        with torch.no_grad():
+            emb_q, q, k = self._get_embeddings(x)
+            pos_ip, neg_ip = self._get_pos_neg_ip(emb_q, k)
+            logits, labels = self._get_contrastive_predictions(q, k)
+
+            contrastive_loss = self._get_contrastive_loss(logits, labels)
+            contrastive_loss = contrastive_loss.mean() * self.hparams.loss_constant_factor
+
+            log_data = {
+                "val/step_train_loss": contrastive_loss.item(),
+                "val/step_pos_cos": pos_ip.item(),
+                "val/step_neg_cos": neg_ip.item(),
+            }
+
+            self.log_dict(log_data)
 
     def validation_epoch_end(self, outputs):
-        top_1_accuracy, top_5_accuracy, average_auc = self.evaluator.score(
+        result = self.evaluator.score(
             self.manager.validation_ds.effective_series_list)
         self.log_dict({
-            "val/sp_top1_accuracy": top_1_accuracy,
-            "val/sp_top5_accuracy": top_5_accuracy,
-            "val/same_patient_auc": average_auc,
+            "val/sp_top1_accuracy": result["top1_accuracy"],
+            "val/sp_top5_accuracy": result["top5_accuracy"],
+            "val/sp_auc": result["average_auc"],
+            "val/sp_top1percent_accuracy": result["top1percent_accuracy"],
         })
 
         self._create_model_checkpoint()

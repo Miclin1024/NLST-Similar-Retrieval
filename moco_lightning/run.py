@@ -121,6 +121,7 @@ if __name__ == '__main__':
         lr=lr,
         batch_size=batch_size,
         eval_batch_size=eval_batch_size,
+        use_both_augmentations_as_queries=True,
         m=m,
         K=K,
         optimizer_name=optimizer_name,

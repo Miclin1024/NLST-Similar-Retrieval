@@ -48,14 +48,8 @@ class ModelParams:
     exclude_matching_parameters_from_lars: list[str] = []  # set to [".bias", ".bn"] to match paper
     loss_constant_factor: float = 1
 
-    # Change these to make more like VICReg
-    use_vicreg_loss: bool = False
     use_lagging_model: bool = True
     use_unit_sphere_projection: bool = True
-    invariance_loss_weight: float = 25.0
-    variance_loss_weight: float = 25.0
-    covariance_loss_weight: float = 1.0
-    variance_loss_epsilon: float = 1e-04
 
     # MLP parameters
     projection_mlp_layers: int = 2

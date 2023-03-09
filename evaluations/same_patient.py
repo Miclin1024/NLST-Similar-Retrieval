@@ -107,6 +107,7 @@ class SamePatientEvaluator:
         embeddings = torch.cat(embeddings_output, dim=0)
 
         auc_scores, top_1_correct_count, top_5_correct_count = [], 0, 0
+        top_1percent_correct_count = 0
         if log_file is not None:
             log_result_df = pd.DataFrame(columns=_LOG_DF_COLUMN_NAMES)
             log_result_sample_index_set = np.random.choice(
@@ -139,6 +140,7 @@ class SamePatientEvaluator:
             if len(np.unique(true_similarity_matrix[i])) <= 1:
                 top_5_correct_count += 1
                 top_1_correct_count += 1
+                top_1percent_correct_count += 1
                 continue
 
             sorted_idx = np.argsort(-similarity_matrix[i])
@@ -146,6 +148,11 @@ class SamePatientEvaluator:
                 idx = sorted_idx[j]
                 if patient_ids[idx] == patient_ids[i]:
                     top_5_correct_count += 1
+                    break
+            for j in range(int(n * .01)):
+                idx = sorted_idx[j]
+                if patient_ids[idx] == patient_ids[i]:
+                    top_1percent_correct_count += 1
                     break
             pred_idx = sorted_idx[0]
             if patient_ids[pred_idx] == patient_ids[i]:
@@ -190,12 +197,14 @@ class SamePatientEvaluator:
 
         top_1_accuracy = round(top_1_correct_count / n, 5)
         top_5_accuracy = round(top_5_correct_count / n, 5)
+        top_1percent_accuracy = round(top_1percent_correct_count / n, 5)
         average_auc = np.mean(auc_scores)
 
         np.set_printoptions(precision=4)
         print(f"Similarity matrix: \n{similarity_matrix}")
-        print(f"Same patient top 1 accuracy: {top_1_accuracy * 100}%, top 5 accuracy: {top_5_accuracy * 100}%")
-        print(f"Average AUC: {average_auc}")
+        print(f"* Same patient top 1 accuracy: {top_1_accuracy * 100}%, top 5 accuracy: {top_5_accuracy * 100}%")
+        print(f"* Same patient top 1% accuracy: {top_1percent_accuracy * 100}%")
+        print(f"* Average AUC: {average_auc}")
 
         if log_result_df is not None:
             log_result_df.to_csv(log_file, index=False)
@@ -203,4 +212,9 @@ class SamePatientEvaluator:
             file_path = os.path.abspath(file_name)
             print(f"Snippet of the similarity results logged to {file_path}")
 
-        return top_1_accuracy, top_5_accuracy, average_auc
+        return {
+            "top1_accuracy": top_1_accuracy,
+            "top5_accuracy": top_5_accuracy,
+            "top1percent_accuracy": top_1percent_accuracy,
+            "average_auc": average_auc,
+        }
