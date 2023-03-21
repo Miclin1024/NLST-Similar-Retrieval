@@ -12,7 +12,7 @@ from evaluations.retrieve_embeddings import CalculateEmbeddings, ShortenLog
 
 
 class DataDict():
-    '''Provides information about metadata.'''
+    """Provides information about metadata."""
     
     data_dict = pd.DataFrame
     metadata = pd.DataFrame    
@@ -236,12 +236,13 @@ class Visualize(UnderstandModel):
             prop = np.sum(data == query_scan_attribute) / self.top_k
             props.append(prop)
         
-        fig = px.histogram(props, histnorm="percent", color=attributes)
+        fig = px.histogram(props, color=attributes)
+        #histnorm="percent"
 
         print(f"Count of {attribute} in entire dataset is: {np.unique(self.metadata[attribute], return_counts=True)}")
         fig.update_layout(
             xaxis_title=f"Proportion of top k scans have attribute {attribute} similar to query scan",
-            yaxis_title=f"Percent of entries", 
+            yaxis_title=f"Count of entries", 
             barmode="group")
         
         fig.show()

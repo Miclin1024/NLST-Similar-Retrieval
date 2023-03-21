@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from definitions import *
-from moco_lightning.builder import MLP
-from moco_lightning.params import ModelParams
+from lightning.builder import MLP
+from lightning.params import ModelParams
 from torch.utils.data import Dataset, DataLoader
 from data.dataset import DatasetManager, NLSTDataset
 

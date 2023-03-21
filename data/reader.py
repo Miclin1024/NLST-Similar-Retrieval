@@ -17,14 +17,10 @@ from dotenv import load_dotenv
 
 # Use a .env file to indicate where the manifests are stored
 load_dotenv(os.path.join(ROOT_DIR, ".env"))
-
 DATA_FOLDER = os.getenv("DATA_FOLDER") or "data/"
-
 PREPROCESS_FOLDER = os.path.join(ROOT_DIR, "data", "cache")
-
 # The list of Patient ID to ignore, due to faulty or corrupted local data entry.
 PATIENT_EXCLUDE_SET = {101224, 102386, 105030, 115933}
-
 os.makedirs(PREPROCESS_FOLDER, exist_ok=True)
 
 
@@ -162,6 +158,19 @@ class NLSTDataReader:
         patient_series_list = self.patient_series_index[patient_id]
         return self.read_series(patient_series_list[0])
 
+    def read_patient_id(self, series_id: SeriesID) -> PatientID:
+        manifest_row = self.manifest.loc[series_id].to_dict()
+        return manifest_row["Subject ID"]
+
+    def same_patient_scans(self, series_id: SeriesID) -> [SeriesID]:
+        pid = self.read_patient_id(series_id)
+        scans = self.patient_series_index[pid]
+        return [scan for scan in scans if scan != series_id]
+
+    def scan_year(self, series_id: SeriesID) -> int:
+        date: str = self.manifest.loc[series_id].to_dict()["Study Date"]
+        return int(date.split("-")[-1])
+
     def original_folder(self, series_id: SeriesID) -> str:
         manifest_row = self.manifest.loc[series_id].to_dict()
         return os.path.join(manifest_row["Manifest Folder"], manifest_row["File Location"])
@@ -177,6 +186,9 @@ class NLSTDataReader:
         return tio.Compose(transforms)(image)
 
 
+env_reader = NLSTDataReader(
+    manifests=list(map(lambda elem: int(elem), os.environ.get("MANIFEST_ID").split(","))))
+
+
 if __name__ == '__main__':
-    reader = NLSTDataReader(manifests=[1632928843386, 1632927888500, 1632929488567])
-    print(reader.read_series(reader.series_list[0], method="direct"))
+    print(env_reader.read_series(env_reader.series_list[0], method="direct"))

@@ -36,6 +36,7 @@ class MLP_Regression(nn.Module):
 class Embedding_Attribute(Dataset):
 
     attribute_dict: dict
+
     def __init__(self, attribute_dict):
         self.attribute_dict = attribute_dict
 

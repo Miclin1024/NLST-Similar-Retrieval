@@ -1,4 +1,6 @@
 import math
+import random
+
 import attrs
 import itertools
 import numpy as np
@@ -6,22 +8,23 @@ from definitions import *
 import torchio as tio
 import torch.utils.data
 from typing import Optional, Callable
-from data.reader import NLSTDataReader
+from data.reader import NLSTDataReader, env_reader
 
 
 def default_moco_transform() -> Callable:
     transforms = [
+        # tio.RandomBiasField(),
         tio.RandomFlip(),
-        tio.RandomBiasField(),
-        tio.RandomElasticDeformation(max_displacement=5),
-        # tio.RandomAffine(
-        #     scales=(1.0, 1.0),
-        #     degrees=45,
-        #     translation=0,
-        #     isotropic=True,
-        #     center="image",
-        # ),
-        tio.RandomNoise(std=(0, 0.1)),
+        # tio.RandomElasticDeformation(max_displacement=5),
+        tio.RandomAffine(
+            scales=(1.0, 1.0),
+            degrees=10,
+            translation=0,
+            isotropic=True,
+            center="image",
+            check_shape=True,
+        ),
+        # tio.RandomNoise(std=(0, 0.1)),
         # tio.RandomBlur(),
 
         tio.ZNormalization(),
@@ -41,7 +44,7 @@ class DatasetManager:
     val_series: list[SeriesID]
     test_series: list[SeriesID]
 
-    def __init__(self, manifests: [int], ds_split=None,
+    def __init__(self, manifests: [int] = None, ds_split=None,
                  transform_train: Callable = default_moco_transform(),
                  transform_validation: Callable = default_moco_transform(),
                  transform_test: Callable = default_moco_transform(),
@@ -50,7 +53,10 @@ class DatasetManager:
         if ds_split is None:
             ds_split = [.8, .2, .0]
 
-        self.reader = NLSTDataReader(manifests, default_access_mode=default_access_mode)
+        if manifests is None:
+            self.reader = env_reader
+        else:
+            self.reader = NLSTDataReader(manifests, default_access_mode=default_access_mode)
         patient_index = self.reader.patient_series_index
         patients_list = list(patient_index.keys())
         np.random.shuffle(patients_list)
@@ -115,14 +121,23 @@ class NLSTDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         q_series_id = self.effective_series_list[idx]
-        k_series_id = q_series_id
-        while k_series_id == q_series_id:
-            k_series_id = np.random.choice(self.effective_series_list)
+
+        if random.random() < 1:
+            sp_scans = self.reader.same_patient_scans(q_series_id)
+            if len(sp_scans) == 0:
+                k_series_id = q_series_id
+            else:
+                k_series_id = np.random.choice(sp_scans)
+        else:
+            k_series_id = q_series_id
+
         # x = channel, depth, width, height
-        slice_image, target = self.reader.read_series(q_series_id)
-        slice_tensor = slice_image.tensor
+        slice_image_q, target = self.reader.read_series(q_series_id)
+        slice_tensor_q = slice_image_q.tensor
+        slice_image_k, target = self.reader.read_series(k_series_id)
+        slice_tensor_k = slice_image_k.tensor
         stacked_tensor = torch.stack(
-            (self.transform(slice_tensor).to(torch.float16), self.transform(slice_tensor).to(torch.float16))
+            (self.transform(slice_tensor_q).to(torch.float16), self.transform(slice_tensor_k).to(torch.float16))
             # (slice_tensor, self.transform(slice_tensor))
         )
         return stacked_tensor, target

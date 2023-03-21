@@ -10,7 +10,9 @@ from tqdm import tqdm
 from definitions import *
 import torch.nn.functional
 import pytorch_lightning as pl
+from evaluations.base import *
 from data import NLSTDataReader
+from data.reader import env_reader
 from torch.nn import CosineSimilarity
 from sklearn.metrics import roc_auc_score
 from typing import TextIO, Optional, Union
@@ -24,11 +26,16 @@ for i in range(SIMILAR_LOG_TOP_SCAN_RETRIEVAL_SIZE):
 
 
 @attrs.define()
-class SamePatientEvaluator:
-    experiment_name: str
-    encoder: Union[pl.LightningModule, torch.nn.Module]
-    reader: NLSTDataReader
-    batch_size: int
+class SamePatientEvaluator(Evaluator):
+
+    @classmethod
+    def from_pl_checkpoint(cls: Type[TEvaluator], hparams: ModelParams,
+                           experiment: str, epoch: int) -> TEvaluator:
+        return super().from_pl_checkpoint(
+            hparams=hparams,
+            experiment=experiment,
+            epoch=epoch
+        )
 
     @staticmethod
     def clear_log_folder(model_name: str, version: int):
@@ -56,7 +63,7 @@ class SamePatientEvaluator:
         return file
 
     @torch.no_grad()
-    def score(self, series_ids: list[SeriesID], log_file: Optional[TextIO] = None) -> (float, float, float):
+    def score(self, series_ids: list[SeriesID], log_file: Optional[TextIO] = None) -> dict:
         """
         Evaluate the same patient prediction performance of the encoder. The encoder will be given 
         single 4D tensors (1, C, W, H, D).
@@ -64,49 +71,18 @@ class SamePatientEvaluator:
         Return the top 1 and top 5 same patient accuracy and the average AUC score.
         """
 
+        result = super().score(series_ids, log_file)
+
         n = len(series_ids)
         cos = CosineSimilarity(dim=0)
 
         similarity_matrix = np.zeros((n, n))
         true_similarity_matrix = np.zeros((n, n))
-        patient_ids: np.ndarray = np.zeros(n)
+        embeddings: torch.Tensor = self._get_embeddings(series_ids)
+        patient_ids: np.ndarray = self._get_patient_ids(series_ids)
         series_ids = np.array(series_ids)
-        embeddings: torch.Tensor = torch.zeros(0, 0)
-        embeddings_output: list[torch.Tensor] = [torch.zeros(0, 0).to("cuda")] * n
 
-        # load in data series in batches
-        for batch_num in tqdm(range(n // self.batch_size + 1),
-                              desc="Encoding raw data for cosine similarity comparison"):
-            idx_start = batch_num * self.batch_size
-            idx_end = min(idx_start + self.batch_size, n)
-            if idx_start == idx_end:
-                continue
-
-            effective_batch_size = idx_end - idx_start
-
-            input_images, input_pids = [], []
-            for i in range(idx_start, idx_end):
-                image, metadata = self.reader.read_series(series_ids[i])
-                input_images.append(image.data)
-                input_pids.append(metadata["pid"])
-
-            input_batch = torch.stack(input_images, dim=0).to("cuda").to(torch.float)
-            if isinstance(self.encoder, torch.nn.Module):
-                emb = self.encoder(input_batch)
-            elif isinstance(self.encoder, pl.LightningModule):
-                emb = self.encoder.model(input_batch)
-                emb = self.encoder.prediction_model(embeddings)
-            else:
-                raise ValueError(f"Unrecognized encoder, must be either a lighting module or a torch module")
-            emb = emb.view(effective_batch_size, -1)
-            emb = torch.nn.functional.normalize(emb, dim=1)
-            for i, pid in enumerate(input_pids):
-                patient_ids[i + idx_start] = pid
-                embeddings_output[i + idx_start] = torch.unsqueeze(emb[i], dim=0)
-
-        embeddings = torch.cat(embeddings_output, dim=0)
-
-        auc_scores, top_1_correct_count, top_5_correct_count = [], 0, 0
+        auc_scores, average_ranks, top_1_correct_count, top_5_correct_count = [], [], 0, 0
         top_1percent_correct_count = 0
         if log_file is not None:
             log_result_df = pd.DataFrame(columns=_LOG_DF_COLUMN_NAMES)
@@ -130,6 +106,7 @@ class SamePatientEvaluator:
                 true_similarity_matrix[i, j], true_similarity_matrix[j, i] = true_similarity, true_similarity
 
         similarity_matrix = similarity_matrix.fill_diagonal_(0).cpu().numpy()
+        similarity_matrix = np.absolute(similarity_matrix)
         np.fill_diagonal(true_similarity_matrix, 0)
 
         log_rows = []
@@ -144,19 +121,15 @@ class SamePatientEvaluator:
                 continue
 
             sorted_idx = np.argsort(-similarity_matrix[i])
-            for j in range(5):
-                idx = sorted_idx[j]
-                if patient_ids[idx] == patient_ids[i]:
-                    top_5_correct_count += 1
-                    break
-            for j in range(int(n * .01)):
-                idx = sorted_idx[j]
-                if patient_ids[idx] == patient_ids[i]:
-                    top_1percent_correct_count += 1
-                    break
-            pred_idx = sorted_idx[0]
-            if patient_ids[pred_idx] == patient_ids[i]:
-                top_1_correct_count += 1
+            ranks = []
+            for j, idx in enumerate(sorted_idx):
+                if idx != i and patient_ids[idx] == patient_ids[i]:
+                    ranks.append(j)
+
+            top_1_correct_count += 1 if np.any(np.array(ranks) == 0) else 0
+            top_5_correct_count += 1 if np.any(np.array(ranks) < 5) else 0
+            top_1percent_correct_count += 1 if np.any(np.array(ranks) < int(n * .01)) else 0
+            average_ranks.append(np.mean(ranks))
 
             head, tail = 200, 200
             observed_patient_ids = [str(val) for val in patient_ids[sorted_idx]]
@@ -199,11 +172,13 @@ class SamePatientEvaluator:
         top_5_accuracy = round(top_5_correct_count / n, 5)
         top_1percent_accuracy = round(top_1percent_correct_count / n, 5)
         average_auc = np.mean(auc_scores)
+        average_rank_percentile = round(1 - np.mean(average_ranks) / n, 2)
 
         np.set_printoptions(precision=4)
         print(f"Similarity matrix: \n{similarity_matrix}")
         print(f"* Same patient top 1 accuracy: {top_1_accuracy * 100}%, top 5 accuracy: {top_5_accuracy * 100}%")
         print(f"* Same patient top 1% accuracy: {top_1percent_accuracy * 100}%")
+        print(f"* Average rank percentile for same patient: {average_rank_percentile * 100}th")
         print(f"* Average AUC: {average_auc}")
 
         if log_result_df is not None:
@@ -213,8 +188,10 @@ class SamePatientEvaluator:
             print(f"Snippet of the similarity results logged to {file_path}")
 
         return {
-            "top1_accuracy": top_1_accuracy,
-            "top5_accuracy": top_5_accuracy,
-            "top1percent_accuracy": top_1percent_accuracy,
-            "average_auc": average_auc,
+            "top1": top_1_accuracy,
+            "top5": top_5_accuracy,
+            "top1percent": top_1percent_accuracy,
+            "auc": average_auc,
+            "percentile": average_rank_percentile,
+            **result
         }

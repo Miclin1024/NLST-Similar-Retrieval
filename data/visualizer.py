@@ -2,12 +2,18 @@ import os
 import cmd
 import shutil
 import readline
+
 import paramiko
 import traceback
+import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from definitions import *
 from typing import Optional
 from data.reader import NLSTDataReader
+
+viewport = os.path.join(LOG_DIR, "viewport")
+
 
 class LogVisualizer(cmd.Cmd):
     intro = """    __               _    ___                  ___                
@@ -19,8 +25,8 @@ class LogVisualizer(cmd.Cmd):
 """
 
     eval_module: Optional[str] = "same_patient"
-    experiment_name: Optional[str] = "r3d_18_moco_v66"
-    checkpoint_name: Optional[str] = "epoch20"
+    experiment_name: Optional[str] = "r3d_18_moco_v84"
+    checkpoint_name: Optional[str] = "epoch5"
     current_experiment_df: Optional[pd.DataFrame] = None
     reader = NLSTDataReader(manifests=list(map(lambda elem: int(elem), os.environ.get("MANIFEST_ID").split(","))))
 
@@ -59,7 +65,6 @@ class LogVisualizer(cmd.Cmd):
 
     @staticmethod
     def do_clear_viewport(arg):
-        viewport = os.path.join(LOG_DIR, "viewport")
         count = 0
         for filename in os.listdir(viewport):
             file_path = os.path.join(viewport, filename)
@@ -107,9 +112,9 @@ class LogVisualizer(cmd.Cmd):
         observed_scores = [float(val) for val in experiment_row["observed_scores"].split(", ")]
 
         true_pid = int(experiment_row['true_patient_id'])
-        true_index = observed_patient_ids.index(true_pid)
-
-        print(f"*** Evaluation Report for {scan_id} ***")
+        true_indices = np.nonzero(np.array(observed_patient_ids) == true_pid)[0]
+        print(f"")
+        print(f"*** Evaluation report for {scan_id} ***")
         print(f"* [Series ID]: {scan_id}")
         print(f"* [Patient ID]: {true_pid}")
         print(f"* [Path]: {self.reader.original_folder(scan_id)}")
@@ -125,29 +130,92 @@ class LogVisualizer(cmd.Cmd):
               f"\t[Patient ID]: {observed_patient_ids[-2]} \n"
               f"\t[Score]: {observed_scores[-2]} \n"
               f"\t[Path]: {self.reader.original_folder(observed_scans[-2])}")
-        print(f"* [Closest Same Patient Scan]: {observed_scans[true_index]} \n"
-              f"\t[Rank]: {true_index} \n"
-              f"\t[Score]: {observed_scores[true_index]} \n"
-              f"\t[Path]: {self.reader.original_folder(observed_scans[true_index])}")
+        for index in true_indices:
+            print(f"* [Same Patient Scan]: {observed_scans[index]} \n"
+                  f"\t[Rank]: {index} \n"
+                  f"\t[Score]: {observed_scores[index]} \n"
+                  f"\t[Path]: {self.reader.original_folder(observed_scans[index])}")
 
-        viewport = os.path.join(LOG_DIR, "viewport")
-        item_path = os.path.join(viewport, scan_id)
+        item_path = os.path.join(viewport, f"[{true_pid}]-{self.reader.scan_year(scan_id)}")
         if not os.path.exists(item_path):
             shutil.copytree(self.reader.original_folder(scan_id),
-                            os.path.join(item_path, f"QUERY[{experiment_row['true_patient_id']}]"))
-            shutil.copytree(self.reader.original_folder(observed_scans[0]),
-                            os.path.join(item_path, f"SMLR_1[{observed_patient_ids[0]}][{observed_scores[0]}]"))
-            shutil.copytree(self.reader.original_folder(observed_scans[1]),
-                            os.path.join(item_path, f"SMLR_2[{observed_patient_ids[1]}][{observed_scores[1]}]"))
-            shutil.copytree(
-                self.reader.original_folder(observed_scans[true_index]),
-                os.path.join(item_path, f"TRUE_1[{observed_patient_ids[true_index]}][{observed_scores[true_index]}]")
-            )
-            shutil.copytree(self.reader.original_folder(observed_scans[-2]),
-                            os.path.join(item_path, f"LEAST_1[{observed_patient_ids[-2]}][{observed_scores[-2]}]"))
+                            os.path.join(item_path, f"QUERY[{true_pid}]"))
+            for i in range(4):
+                shutil.copytree(self.reader.original_folder(observed_scans[0]),
+                                os.path.join(item_path,
+                                             f"SMLR_{i + 1}[{observed_patient_ids[i]}][{observed_scores[i]}]"))
+
+            for i, index in enumerate(true_indices):
+                shutil.copytree(
+                    self.reader.original_folder(observed_scans[index]),
+                    os.path.join(item_path, f"TRUE_{i}[{observed_patient_ids[index]}][{observed_scores[index]}]")
+                )
+
+            for i in range(2):
+                shutil.copytree(self.reader.original_folder(observed_scans[-2]),
+                                os.path.join(item_path,
+                                             f"LEAST_{i + 1}[{observed_patient_ids[-i-2]}][{observed_scores[-i-2]}]"))
 
         print(f"* Raw data loaded to {os.path.abspath(item_path)}")
+        print(f"*** Evaluation report end ***")
+        print(f"")
 
+    def do_report(self, arg):
+        assert self.current_experiment_df is not None, "No log data loaded yet."
+
+        n = 20
+        samples = self.current_experiment_df.sample(n)
+        print(f"Generating report for {self.experiment_name}->{self.checkpoint_name}, {n} scans sampled.")
+        report_dir = os.path.join(LOG_DIR, "reports", f"{self.experiment_name}-{self.checkpoint_name}")
+        if os.path.exists(report_dir):
+            print("Report exists for the current checkpoint, overwriting.")
+            shutil.rmtree(report_dir)
+        os.makedirs(report_dir)
+
+        for scan_id, experiment_row in tqdm(samples.iterrows(), f"Moving scans to the report folder"):
+            scan_id, experiment_row = str(scan_id), experiment_row.to_dict()
+
+            observed_scans = experiment_row["observed_scans"].split(", ")
+            observed_patient_ids = [round(float(val)) for val in experiment_row["observed_patient_ids"].split(", ")]
+            observed_scores = [float(val) for val in experiment_row["observed_scores"].split(", ")]
+            true_pid = int(experiment_row['true_patient_id'])
+            true_indices = np.nonzero(np.array(observed_patient_ids) == true_pid)[0]
+
+            item_path = os.path.join(report_dir, f"[{true_pid}]-{self.reader.scan_year(scan_id)}")
+            if not os.path.exists(item_path):
+                shutil.copytree(
+                    self.reader.original_folder(scan_id),
+                    os.path.join(item_path, f"QUERY[{true_pid}]")
+                )
+
+                for i in range(20):
+                    shutil.copytree(
+                        self.reader.original_folder(observed_scans[0]),
+                        os.path.join(
+                            item_path,
+                            f"SMLR_{i + 1}[{observed_patient_ids[i]}][{observed_scores[i]}]"
+                        )
+                    )
+
+                for i, index in enumerate(true_indices):
+                    shutil.copytree(
+                        self.reader.original_folder(observed_scans[index]),
+                        os.path.join(
+                            item_path,
+                            f"TRUE_{i}[{observed_patient_ids[index]}][{observed_scores[index]}]"
+                        )
+                    )
+
+                for i in range(5):
+                    shutil.copytree(
+                        self.reader.original_folder(observed_scans[-2]),
+                        os.path.join(
+                            item_path,
+                            f"LEAST_{i + 1}[{observed_patient_ids[-i - 2]}][{observed_scores[-i - 2]}]"
+                        )
+                    )
+
+        print(f"Report generated at {os.path.abspath(report_dir)}.")
 
     def onecmd(self, line):
         try:

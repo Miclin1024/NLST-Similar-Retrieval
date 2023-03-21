@@ -2,7 +2,6 @@ import torch
 import random
 import pydicom
 import numpy as np
-from PIL import ImageFilter
 
 
 # Reference: https://www.kaggle.com/code/redwankarimsony/ct-scans-dicom-files-windowing-explained/notebook
