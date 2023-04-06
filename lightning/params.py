@@ -1,5 +1,6 @@
 from typing import Optional, Callable
 import attrs
+import torchio as tio
 import torch.nn as nn
 
 
@@ -64,3 +65,24 @@ class ModelParams:
     drop_last_batch: bool = True
     pin_data_memory: bool = True
     gather_keys_for_queue: bool = False
+
+    # dataset parameters
+    augmentations: [tio.Transform] = [
+        # tio.RandomBiasField(),
+        tio.RandomFlip(),
+        # tio.RandomElasticDeformation(max_displacement=5),
+        tio.RandomAffine(
+            scales=(1.0, 1.0),
+            degrees=10,
+            translation=0,
+            isotropic=True,
+            center="image",
+            check_shape=True,
+        ),
+        # tio.RandomNoise(std=(0, 0.1)),
+        # tio.RandomBlur(),
+
+        tio.ZNormalization(),
+    ]
+    same_patient_as_positive_pair: bool = True
+    one_scan_for_each_patient: bool = True

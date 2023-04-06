@@ -59,18 +59,29 @@ class LitMoCo(pl.LightningModule):
 
         self.model = hparams.encoder
 
-        self.manager = DatasetManager(ds_split=[.75, .25, 0], default_access_mode="cached")
+        self.manager = DatasetManager(hparams, ds_split=[.75, .25, 0], default_access_mode="cached")
         _reader = self.manager.reader
-        experiment_linear_evaluator = partial(LinearEvaluator, experiment_name,
-                                              hparams.eval_batch_size or hparams.batch_size, self)
+        experiment_regression_evaluator = partial(
+            RegressionEvaluator, experiment_name, hparams.eval_batch_size or hparams.batch_size, self
+        )
+        experiment_classification_evaluator = partial(
+            ClassificationEvaluator, experiment_name, hparams.eval_batch_size or hparams.batch_size, self
+        )
         self.evaluators = {
             "sp": SamePatientEvaluator(experiment_name, hparams.eval_batch_size or hparams.batch_size, self),
-            "linear/gender": experiment_linear_evaluator(target_key="gender"),
-            "linear/cigsmok": experiment_linear_evaluator(target_key="cigsmok"),
-            "linear/diag/fibr": experiment_linear_evaluator(target_key="diagfibr"),
-            "linear/weight": experiment_linear_evaluator(target_key="weight", regression=True),
-            "linear/height": experiment_linear_evaluator(target_key="height", regression=True),
-            "linear/pkyr": experiment_linear_evaluator(target_key="pkyr", regression=True),
+            "linear/gender": experiment_classification_evaluator(target_key="gender"),
+            "linear/cigsmok": experiment_classification_evaluator(target_key="cigsmok"),
+            "linear/diag/fibr": experiment_classification_evaluator(target_key="diagfibr"),
+            "linear/diag/heart": experiment_classification_evaluator(target_key="diaghear"),
+            "linear/diag/hype": experiment_classification_evaluator(target_key="diaghype"),
+            "linear/diag/emph": experiment_classification_evaluator(target_key="diagemph"),
+            "linear/diag/diab": experiment_classification_evaluator(target_key="diagdiab"),
+            "linear/diag/chro": experiment_classification_evaluator(target_key="diagchro"),
+            "linear/invaslc": experiment_classification_evaluator(target_key="invaslc"),
+            "linear/icd_topo": experiment_classification_evaluator(target_key="confirmed_icd_topog1", ignore_nan=False),
+            "linear/weight": experiment_regression_evaluator(target_key="weight"),
+            "linear/height": experiment_regression_evaluator(target_key="height"),
+            "linear/age": experiment_regression_evaluator(target_key="age"),
         }
 
         if hparams.use_lagging_model:

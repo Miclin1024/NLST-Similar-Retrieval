@@ -20,7 +20,7 @@ load_dotenv(os.path.join(ROOT_DIR, ".env"))
 DATA_FOLDER = os.getenv("DATA_FOLDER") or "data/"
 PREPROCESS_FOLDER = os.path.join(ROOT_DIR, "data", "cache")
 # The list of Patient ID to ignore, due to faulty or corrupted local data entry.
-PATIENT_EXCLUDE_SET = {101224, 102386, 105030, 115933}
+PATIENT_EXCLUDE_SET = {101224, 102386, 105030, 115933, 200001}
 os.makedirs(PREPROCESS_FOLDER, exist_ok=True)
 
 
@@ -72,6 +72,10 @@ class NLSTDataReader:
 
         exclude_set = PATIENT_EXCLUDE_SET
         exclude_set.update(set(self.manifest[self.manifest["Number of Images"] < 100]["Subject ID"]))
+
+        grouped = self.manifest.groupby("Subject ID").size()
+        single_scan_patients = grouped[grouped == 1]
+        exclude_set.update(set(single_scan_patients.index.tolist()))
 
         # Remove rows belongs to the exclude set.
         self.manifest = self.manifest[~self.manifest["Subject ID"].isin(exclude_set)]
