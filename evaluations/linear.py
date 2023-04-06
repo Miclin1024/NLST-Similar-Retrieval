@@ -108,11 +108,13 @@ class ClassificationEvaluator(LinearEvaluator):
                 y_true = y_test_binarize[:, i]
                 if len(np.unique(y_true)) > 1:
                     auc_scores.append(metrics.roc_auc_score(y_true, y_test_pred_prob[:, i]))
-            auc_score = np.mean(auc_scores)
+
+            weights = np.bincount(y_test) / len(y_test)
+            auc_score = np.dot(auc_scores, weights)
 
             np.set_printoptions(precision=4)
             print(f"* Linear classifier accuracy for multi-class metadata key \"{self.target_key}\": {accuracy * 100}%")
-            print(f"* Macro-average AUC for {len(auc_scores)} out of {num_class} classes: {auc_score}")
+            print(f"* Weighted-average AUC for {len(auc_scores)} out of {num_class} classes: {auc_score}")
 
         else:
             classifier = LogisticRegression()
