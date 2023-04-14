@@ -21,20 +21,18 @@ class Evaluator:
     batch_size: int = attrs.field()
     encoder: Union[pl.LightningModule, torch.nn.Module] = attrs.field()
     reader: NLSTDataReader = attrs.field(default=env_reader)
-    metadata: pd.DataFrame = attrs.field(
-        init=False,
-        default=pd.read_csv(
-            os.path.join(ROOT_DIR, "metadata", "nlst_297_prsn_20170404.csv"),
-            dtype={201: "str", 224: "str", 225: "str"}
-        )
-    )
 
     # Class variables
     _cache_model_state: ClassVar[str] = ""
     _cache_embeddings: ClassVar[dict[SeriesID, Tensor]] = {}
 
-    def __attrs_post_init__(self):
-        self.metadata = self.metadata.set_index("pid")
+    @property
+    def metadata(self) -> pd.DataFrame:
+        return self.reader.metadata
+
+    @property
+    def manifest(self) -> pd.DataFrame:
+        return self.reader.manifest
 
     @classmethod
     def from_pl_checkpoint(cls: Type[TEvaluator], hparams: ModelParams,
