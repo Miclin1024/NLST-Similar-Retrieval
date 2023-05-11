@@ -74,9 +74,7 @@ class SamePatientEvaluator(Evaluator):
         result = super().score(series_ids, log_file)
 
         n = len(series_ids)
-        cos = CosineSimilarity(dim=0)
 
-        similarity_matrix = np.zeros((n, n))
         true_similarity_matrix = np.zeros((n, n))
         embeddings: torch.Tensor = self._get_embeddings(series_ids)
         patient_ids: np.ndarray = self._get_patient_ids(series_ids)

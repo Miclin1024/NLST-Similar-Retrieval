@@ -5,6 +5,7 @@ import pickle
 import hashlib
 from definitions import *
 from data.reader import *
+import pydicom
 from abc import abstractmethod
 import pytorch_lightning as pl
 from lightning.utils import MLP
@@ -14,6 +15,7 @@ from typing import Union, TypeVar, Type, TextIO, ClassVar
 TEvaluator = TypeVar("TEvaluator", bound="Evaluator")
 model_logdir = os.path.join(LOG_DIR, "models")
 
+pydicom.dcmread()
 
 @attrs.define()
 class Evaluator:

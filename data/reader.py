@@ -158,6 +158,9 @@ class NLSTDataReader:
             "series_id": series_id
         }
 
+    def read_series_idx(self, idx: int) -> Tuple[tio.Image, dict]:
+        return self.read_series(self.series_list[idx])
+
     def read_patient(self, patient_id: PatientID) -> Tuple[tio.Image, dict]:
         patient_series_list = self.patient_series_index[patient_id]
         return self.read_series(patient_series_list[0])
@@ -165,6 +168,9 @@ class NLSTDataReader:
     def read_patient_id(self, series_id: SeriesID) -> PatientID:
         manifest_row = self.manifest.loc[series_id].to_dict()
         return manifest_row["Subject ID"]
+
+    def read_series_at_path(self, path: Union[os.PathLike, str]) -> tio.Image:
+        return self.preprocess(tio.ScalarImage(path))
 
     def same_patient_scans(self, series_id: SeriesID) -> [SeriesID]:
         pid = self.read_patient_id(series_id)
@@ -192,7 +198,3 @@ class NLSTDataReader:
 
 env_reader = NLSTDataReader(
     manifests=list(map(lambda elem: int(elem), os.environ.get("MANIFEST_ID").split(","))))
-
-
-if __name__ == '__main__':
-    print(env_reader.read_series(env_reader.series_list[0], method="direct"))
