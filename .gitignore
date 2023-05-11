@@ -188,3 +188,4 @@ data/*/*
 tb_logs/
 logs/
 metadata/
+inference/index/
